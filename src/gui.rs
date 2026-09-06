@@ -1067,7 +1067,7 @@ impl App {
                 }
                 if ui.add(btn("Add a game", false)).clicked() {
                     if let Some(p) = rfd::FileDialog::new()
-                        .add_filter("Executables", &["exe"])
+                        .add_filter("Executables", &["exe", "bin"])
                         .pick_file()
                     {
                         self.add_game(p, ui.ctx());
@@ -1986,7 +1986,7 @@ impl eframe::App for App {
                         }
                     }
                     if ui.add_sized([96.0, 40.0], egui::Button::new("Exe…")).clicked() {
-                        let mut dlg = rfd::FileDialog::new().add_filter("Executables", &["exe"]);
+                        let mut dlg = rfd::FileDialog::new().add_filter("Executables", &["exe", "bin"]);
                         if let Some(d) = &start_dir { dlg = dlg.set_directory(d); }
                         if let Some(p) = dlg.pick_file() {
                             self.exe_text = p.to_string_lossy().into_owned();

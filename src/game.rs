@@ -697,7 +697,14 @@ pub fn find_game_exes(dir: &Path) -> Vec<PathBuf> {
         if let Ok(rd) = fs::read_dir(d) {
             for e in rd.flatten() {
                 let p = e.path();
-                if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("exe")) && p.is_file() {
+                // Not every game launcher is named .exe: Aion ships aion.bin,
+                // which is an ordinary PE (#16). Anything that is not really a
+                // PE is dropped by the bitness read further down, so widening
+                // the extension costs nothing.
+                if p.extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("exe") || x.eq_ignore_ascii_case("bin"))
+                    && p.is_file()
+                {
                     found.push(p);
                 }
             }
@@ -1032,6 +1039,25 @@ mod tests {
         assert!(!found
             .iter()
             .any(|p| p.to_string_lossy().contains("Redistributables")));
+    }
+
+    #[test]
+    fn find_game_exes_accepts_bin_launchers() {
+        // Aion's launcher is aion.bin, an ordinary PE with an unusual
+        // extension; before this it was invisible to the scan (#16).
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path().join("Aion");
+        fs::create_dir_all(&d).unwrap();
+        let exe = d.join("aion.bin");
+        make_pe(&exe, PE_X64);
+        assert_eq!(find_game_exes(&d), vec![exe]);
+
+        // A .bin that is not a PE at all is still ignored.
+        let t2 = tempfile::tempdir().unwrap();
+        let d2 = t2.path().join("Game");
+        fs::create_dir_all(&d2).unwrap();
+        fs::write(d2.join("data.bin"), b"not a PE, just data").unwrap();
+        assert!(find_game_exes(&d2).is_empty());
     }
 
     #[test]
