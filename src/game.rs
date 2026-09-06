@@ -117,6 +117,11 @@ pub enum Api {
     Dx10,
     Dx11,
     Dx12,
+    /// Imports `d3d9.dll` and no newer Direct3D. DLSS needs a D3D11/12 device,
+    /// so these need dgVoodoo2 in front before anything here applies -- and the
+    /// system d3d9.dll is loaded by name, so a local ReShade d3d9.dll is what
+    /// hooks it, never the dxgi.dll this tool installs (#16, Aion).
+    Dx9,
     /// Imports `vulkan-1.dll` and no Direct3D. ReShade reaches a Vulkan game
     /// through a registered Vulkan layer, not through a `dxgi.dll` beside the
     /// exe, so this install has nothing to load (#6, Detroit: Become Human).
@@ -131,6 +136,7 @@ impl Api {
             Api::Dx10 => "DX10",
             Api::Dx11 => "DX11",
             Api::Dx12 => "DX12",
+            Api::Dx9 => "DX9",
             Api::Vulkan => "Vulkan",
             Api::Unknown => "API unknown, assuming DX12",
         }
@@ -221,6 +227,8 @@ fn classify_imports(imports: &[String]) -> Api {
         Api::Dx10
     } else if has("vulkan-1.dll") {
         Api::Vulkan
+    } else if has("d3d9.dll") {
+        Api::Dx9
     } else {
         Api::Unknown
     }
@@ -282,12 +290,19 @@ pub fn detect_api(exe: &Path) -> Api {
         .collect();
     dlls.sort_by_key(|(size, _)| std::cmp::Reverse(*size));
     let mut seen_dx11 = false;
+    let mut seen_dx9 = false;
     for (_, dll) in dlls.into_iter().take(12) {
         match classify(&pe_imports(&dll)) {
             Api::Dx12 => return Api::Dx12,
             Api::Dx11 => seen_dx11 = true,
+            // Aion renders through XRenderD3D9.dll rather than from the exe,
+            // so the renderer DLL is the only place the API shows (#16).
+            Api::Dx9 => seen_dx9 = true,
             Api::Dx10 | Api::Vulkan | Api::Unknown => {}
         }
+    }
+    if seen_dx9 && !seen_dx11 {
+        return Api::Dx9;
     }
     if seen_dx11 {
         Api::Dx11
@@ -594,6 +609,18 @@ pub fn inspect(exe: &Path) -> Result<GameStatus> {
         );
     }
     let api = detect_api(exe);
+    if api == Api::Dx9 {
+        problems.push(
+            "This is a DirectX 9 game. DLSS needs a Direct3D 11 or 12 device, which D3D9 \
+             never creates, so nothing here can attach to it as it stands -- and the game \
+             loads the system d3d9.dll by name, so the dxgi.dll this tool installs is never \
+             even asked for (no ReShade overlay, no ReShade.log). The route that works is \
+             dgVoodoo 2.87.3 first: it turns D3D9 into D3D11, and everything else follows \
+             from there. Put its D3D9.dll from the MS/x86 folder beside the exe with \
+             OutputAPI = bestavailable, confirm the game still starts, then run Install again."
+                .into(),
+        );
+    }
     let is32 = bitness == 32;
     if is32 && api == Api::Dx12 {
         problems.push(
@@ -964,6 +991,18 @@ mod tests {
     /// A Vulkan-only game imports vulkan-1.dll and no Direct3D; the dxgi.dll
     /// proxy can never load in one, so it has to be named rather than
     /// reported as "API unknown, assuming DX12" (#6).
+    #[test]
+    fn classify_imports_reads_d3d9() {
+        // Aion imports d3d9.dll (through XRenderD3D9.dll) and nothing newer;
+        // before this it read as "unknown, assume DX12" and the tool installed
+        // a dxgi.dll the game never loads (#16).
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(classify_imports(&s(&["d3d9.dll"])), Api::Dx9);
+        // A game that also uses something newer is not a D3D9 game.
+        assert_eq!(classify_imports(&s(&["d3d9.dll", "d3d11.dll"])), Api::Dx11);
+        assert_eq!(classify_imports(&s(&["d3d9.dll", "d3d12.dll"])), Api::Dx12);
+    }
+
     #[test]
     fn classify_imports_reads_vulkan() {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();

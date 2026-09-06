@@ -1,0 +1,14 @@
+C:\Users\Faisal\Ai\Apps Dev\DLSS5oneclick\target-alt\release\deps\serde-94555c808ac39fb1.d: C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\Faisal\Ai\Apps\ Dev\DLSS5oneclick\target-alt\release\build\serde-3d30dd0d60fc8949\out/private.rs
+
+C:\Users\Faisal\Ai\Apps Dev\DLSS5oneclick\target-alt\release\deps\libserde-94555c808ac39fb1.rlib: C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\Faisal\Ai\Apps\ Dev\DLSS5oneclick\target-alt\release\build\serde-3d30dd0d60fc8949\out/private.rs
+
+C:\Users\Faisal\Ai\Apps Dev\DLSS5oneclick\target-alt\release\deps\libserde-94555c808ac39fb1.rmeta: C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs C:\Users\Faisal\Ai\Apps\ Dev\DLSS5oneclick\target-alt\release\build\serde-3d30dd0d60fc8949\out/private.rs
+
+C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs:
+C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs:
+C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs:
+C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs:
+C:\Users\Faisal\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs:
+C:\Users\Faisal\Ai\Apps\ Dev\DLSS5oneclick\target-alt\release\build\serde-3d30dd0d60fc8949\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\Faisal\\Ai\\Apps Dev\\DLSS5oneclick\\target-alt\\release\\build\\serde-3d30dd0d60fc8949\\out
