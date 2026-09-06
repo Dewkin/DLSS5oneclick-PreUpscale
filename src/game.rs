@@ -716,8 +716,10 @@ fn norm(s: &str) -> String {
 ///
 /// Looks in the folder itself and in any `*/Binaries/Win64/` (Unreal layout,
 /// where ReShade must sit next to the `-Shipping.exe`, not the root launcher).
-/// Keeps 64-bit PEs only, drops known helpers, then ranks: Unreal shipping
-/// exe > name matches the folder name > larger file.
+/// Prefers 64-bit PEs, drops known helpers, then ranks: Unreal shipping
+/// exe > name matches the folder name > larger file. A folder with no 64-bit
+/// game at all falls back to its 32-bit exes, which the feeder drives through
+/// its host64 helper (Max Payne, #17).
 pub fn find_game_exes(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = Vec::new();
     let mut push_dir = |d: &Path| {
@@ -785,11 +787,12 @@ pub fn find_game_exes(dir: &Path) -> Vec<PathBuf> {
         push_dir(&eng);
     }
     let folder = norm(dir.file_name().and_then(|n| n.to_str()).unwrap_or(""));
-    let mut scored: Vec<(i64, PathBuf)> = found
+    let mut scored: Vec<(u8, i64, PathBuf)> = found
         .into_iter()
         .filter_map(|p| {
             let stem = p.file_stem()?.to_str()?.to_ascii_lowercase();
-            if is_helper_name(&stem) || exe_bitness(&p).ok()? != 64 {
+            let bits = exe_bitness(&p).ok()?;
+            if is_helper_name(&stem) {
                 return None;
             }
             let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0) as i64;
@@ -806,11 +809,17 @@ pub fn find_game_exes(dir: &Path) -> Vec<PathBuf> {
                 score += 1_000_000_000;
             }
             score += size.min(400_000_000);
-            Some((score, p))
+            Some((bits, score, p))
         })
         .collect();
-    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
-    scored.into_iter().map(|(_, p)| p).collect()
+    // A 32-bit exe sitting beside a 64-bit one is a tool, not the game, so
+    // 64-bit wins whenever one exists. Only a folder with nothing 64-bit in it
+    // (Max Payne, #17) falls back to 32-bit.
+    if scored.iter().any(|s| s.0 == 64) {
+        scored.retain(|s| s.0 == 64);
+    }
+    scored.sort_by_key(|s| std::cmp::Reverse(s.1));
+    scored.into_iter().map(|(_, _, p)| p).collect()
 }
 
 /// Accepts either a game exe or a game folder; returns the exe to use plus
@@ -840,7 +849,7 @@ pub fn resolve_target(input: &Path) -> Result<(PathBuf, Vec<PathBuf>)> {
         let c = find_game_exes(input);
         return match c.first() {
             Some(first) => Ok((first.clone(), c)),
-            None => bail!("no 64-bit game executable found in {}", input.display()),
+            None => bail!("no game executable found in {}", input.display()),
         };
     }
     bail!("not found: {}", input.display())
@@ -951,6 +960,18 @@ mod tests {
         let st = inspect(&make_pe(&t.path().join("g32.exe"), PE_X86)).unwrap();
         assert!(st.is32() && st.mode == Mode::Feeder);
         assert!(!st.problems.iter().any(|p| p.contains("32-bit")));
+    }
+
+    /// Max Payne is a 32-bit game and has no 64-bit exe at all; picking the
+    /// folder used to find nothing, so it only worked when the exe was chosen
+    /// by hand (#17). The feeder drives 32-bit games through its host64 helper.
+    #[test]
+    fn find_game_exes_falls_back_to_32bit_when_no_64bit_exists() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path().join("Max Payne");
+        fs::create_dir_all(&d).unwrap();
+        make_pe(&d.join("maxpayne.exe"), PE_X86);
+        assert_eq!(find_game_exes(&d), vec![d.join("maxpayne.exe")]);
     }
 
     #[test]
