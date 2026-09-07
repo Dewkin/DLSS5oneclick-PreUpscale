@@ -19,7 +19,7 @@ mod update;
 use std::io::Write;
 use std::path::PathBuf;
 
-/// `dlss5oneclick <GAME.exe | game folder> [--remove | --remove-all | --check | --diagnose | --engine=opti | --renodx | --ignore-anticheat | --mode=feeder|native] | --update` runs headless; no args opens the GUI.
+/// `dlss5oneclick <GAME.exe | game folder> [--remove | --remove-all | --check | --diagnose | --engine=opti | --renodx | --upstream | --ignore-anticheat | --mode=feeder|native] | --update` runs headless; no args opens the GUI.
 /// Read by the NVIDIA and AMD drivers from this exe's export table to choose
 /// the discrete GPU for the whole process. Exported by the linker flags in
 /// build.rs; the values themselves are what the drivers read (#32).
@@ -133,12 +133,15 @@ error: {e:#}"
             args.iter().any(|a| a == "--remove-all"),
             args.iter().any(|a| a == "--check"),
             args.iter().any(|a| a == "--diagnose"),
-            if args.iter().any(|a| a == "--engine=opti" || a == "--opti") {
-                installer::Engine::Opti
-            } else {
-                installer::Engine::ReShade
+            Choice {
+                engine: if args.iter().any(|a| a == "--engine=opti" || a == "--opti") {
+                    installer::Engine::Opti
+                } else {
+                    installer::Engine::ReShade
+                },
+                with_renodx: args.iter().any(|a| a == "--renodx"),
+                upstream: args.iter().any(|a| a == "--upstream"),
             },
-            args.iter().any(|a| a == "--renodx"),
         );
         std::process::exit(code);
     }
@@ -194,15 +197,26 @@ fn cli_update() -> i32 {
     }
 }
 
+/// What to install, as chosen on the command line.
+struct Choice {
+    engine: installer::Engine,
+    with_renodx: bool,
+    upstream: bool,
+}
+
 fn cli(
     target: PathBuf,
     remove: bool,
     remove_all: bool,
     check: bool,
     diagnose_only: bool,
-    engine: installer::Engine,
-    with_renodx: bool,
+    choice: Choice,
 ) -> i32 {
+    let Choice {
+        engine,
+        with_renodx,
+        upstream,
+    } = choice;
     let (exe, candidates) = match game::resolve_target(&target) {
         Ok(v) => v,
         Err(e) => {
@@ -266,7 +280,7 @@ fn cli(
                 for p in &st.problems {
                     println!("  ! {}", text::tidy(p));
                 }
-                let names: Vec<&str> = installer::plan_with(&st, engine, with_renodx)
+                let names: Vec<&str> = installer::plan_with(&st, engine, with_renodx, upstream)
                     .iter()
                     .map(|s| s.name)
                     .collect();
@@ -382,7 +396,7 @@ fn cli(
             Error => println!("\n      FAILED: {detail}"),
         }
     };
-    match installer::run_all_with(&exe, engine, with_renodx, &progress, &step) {
+    match installer::run_all_with(&exe, engine, with_renodx, upstream, &progress, &step) {
         Ok(_) => {
             if engine == installer::Engine::Opti {
                 println!(

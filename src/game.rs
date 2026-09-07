@@ -23,6 +23,10 @@ pub const DLSS_DLL: &str = "nvngx_dlss.dll";
 pub const LUMENITE_KERNEL_FX: &str = "lumenite_Kernel.fx";
 pub const LUMENITE_BLUENOISE: &str = "lumenite_bluenoise256.png";
 pub const BRIDGE_ADDON: &str = "dlss5-bridge.addon64";
+/// matiasLombo's neural-upstream add-on. The name is not ours to choose: the
+/// NGX snippet gates feature creation on the calling module's path containing
+/// `nvngx.dll`, and under any other name it returns 0xBAD00002 and does nothing.
+pub const UPSTREAM_ADDON: &str = "nvngx.dll.addon64";
 /// Files this tool wrote for an OptiScaler install, one path per line.
 pub const OPTI_MANIFEST: &str = ".dlss5oneclick-optiscaler-manifest";
 /// Sidecar written next to an `nvngx_dlss.dll` this tool placed, so it is never mistaken for the game's own.
@@ -469,6 +473,8 @@ pub struct GameStatus {
     /// Capcom RE Engine (needs REFramework before ReShade will run).
     pub re_engine: bool,
     pub reframework: bool,
+    /// matiasLombo's neural-upstream add-on is in the folder.
+    pub upstream: bool,
     /// RenoDX game mod this tool installed, from its manifest.
     pub renodx_mod: Option<String>,
     /// Other RenoDX game mods found in the folder (not ours, not the DLSS 5 add-on).
@@ -561,9 +567,11 @@ impl GameStatus {
                     && (!self.is32() || (self.host_exe && self.host_reshade))
             }
             Mode::Native => {
+                // Either neural consumer counts: the RenoDX add-on, or the
+                // experimental Neural Upstream one that stands in its place.
                 (self.opti && self.dlssnr)
                     || (self.reshade
-                        && self.dlss5_addon
+                        && (self.dlss5_addon || self.upstream)
                         && self.dlssnr
                         && (!self.needs_bridge() || self.bridge))
             }
@@ -659,6 +667,7 @@ pub fn inspect(exe: &Path) -> Result<GameStatus> {
         api,
         bridge: d.join(BRIDGE_ADDON).is_file() || d.join("dlss5-dx11-bridge.addon64").is_file(),
         opti: d.join(OPTI_MANIFEST).is_file(),
+        upstream: d.join(UPSTREAM_ADDON).is_file(),
         gpu,
         exe: exe.to_path_buf(),
         bitness,
@@ -1244,6 +1253,22 @@ mod tests {
         fs::remove_dir_all(d.join("Game")).unwrap();
         fs::write(d.join("Foo_BE.exe"), b"x").unwrap();
         assert_eq!(detect_anticheat(d), Some("BattlEye"));
+    }
+
+    /// Neural Upstream stands in for the RenoDX add-on, so an install that has
+    /// it plus the model is complete without `renodx-dlss5.addon64` (#50).
+    #[test]
+    fn upstream_counts_as_the_neural_consumer() {
+        let t = tempfile::tempdir().unwrap();
+        let exe = make_pe(&t.path().join("game.exe"), PE_X64);
+        let mut st = inspect(&exe).unwrap();
+        st.mode = Mode::Native;
+        st.api = Api::Dx12;
+        st.reshade = true;
+        st.dlssnr = true;
+        assert!(!st.complete());
+        st.upstream = true;
+        assert!(st.complete());
     }
 
     #[test]
