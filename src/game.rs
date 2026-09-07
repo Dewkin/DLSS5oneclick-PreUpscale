@@ -365,13 +365,33 @@ pub fn has_agility_redist(dir: &Path) -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
-/// True when the PE imports `d3d9.dll` for something other than the
-/// `D3DPERF_*` debug markers, i.e. it actually renders with Direct3D 9.
+/// An import that only a renderer newer than Direct3D 9 would carry.
 ///
-/// Direct3D 9 predates DXGI and never uses it, so importing `dxgi.dll` settles
-/// it on its own: that is a DXGI-era renderer creating its device at runtime.
+/// Direct3D 9 predates DXGI and never uses it, so `dxgi.dll` settles it alone.
+/// Beyond that, upscaler and latency libraries are shipped per graphics API and
+/// name it in the file: FidelityFX FSR2's backends are `..._dx12_x64.dll` and
+/// `..._vk_x64.dll` (AMD ships one per target API), and NVIDIA's Reflex library
+/// for Vulkan is `nvlowlatencyvk.dll`. Red Dead Redemption 2 imports all three
+/// while creating its real device at runtime, and statically imports
+/// `Direct3DCreate9Ex` besides, so neither the marker rule nor DXGI alone
+/// caught it (#53).
+fn implies_newer_than_d3d9(import: &str) -> bool {
+    let stem = import.strip_suffix(".dll").unwrap_or(import);
+    matches!(
+        stem,
+        "dxgi" | "d3d10" | "d3d10_1" | "d3d11" | "d3d12" | "vulkan-1"
+    ) || stem.contains("dx11")
+        || stem.contains("dx12")
+        || stem.contains("vulkan")
+        || stem.ends_with("vk")
+        || stem.contains("_vk_")
+}
+
+/// True when the PE imports `d3d9.dll` for something other than the
+/// `D3DPERF_*` debug markers *and* carries nothing that implies a newer API.
 fn d3d9_is_the_renderer(pe: &Path) -> bool {
-    if pe_imports(pe).iter().any(|i| i == "dxgi.dll") {
+    let imports = pe_imports(pe);
+    if imports.iter().any(|i| implies_newer_than_d3d9(i)) {
         return false;
     }
     let fns = pe_import_fns(pe, "d3d9.dll");
@@ -1257,6 +1277,23 @@ mod tests {
             ],
         );
         assert_eq!(detect_api(&dxgi), Api::Unknown);
+
+        // Red Dead Redemption 2's own import table (#53): a real
+        // Direct3DCreate9Ex import, no dxgi.dll at all, and the FSR2 and Reflex
+        // libraries for D3D12 and Vulkan beside it.
+        let rdr2 = testutil::make_pe_importing_many(
+            &t.path().join("RDR2.exe"),
+            &[
+                ("d3d9.dll", &["Direct3DCreate9Ex"][..]),
+                ("nvlowlatencyvk.dll", &["NvLL_VK_Initialize"][..]),
+                (
+                    "ffx_fsr2_api_dx12_x64.dll",
+                    &["ffxFsr2GetInterfaceDX12"][..],
+                ),
+                ("ffx_fsr2_api_vk_x64.dll", &["ffxFsr2GetInterfaceVK"][..]),
+            ],
+        );
+        assert_eq!(detect_api(&rdr2), Api::Unknown);
     }
 
     #[test]
