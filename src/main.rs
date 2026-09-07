@@ -19,7 +19,7 @@ mod update;
 use std::io::Write;
 use std::path::PathBuf;
 
-/// `dlss5oneclick <GAME.exe | game folder> [--remove | --remove-all | --check | --diagnose | --engine=opti | --renodx | --upstream | --ignore-anticheat | --mode=feeder|native] | --update` runs headless; no args opens the GUI.
+/// `dlss5oneclick <GAME.exe | game folder> [--remove | --remove-all | --check | --diagnose | --engine=opti | --renodx | --upstream | --imports | --ignore-anticheat | --mode=feeder|native] | --update` runs headless; no args opens the GUI.
 /// Read by the NVIDIA and AMD drivers from this exe's export table to choose
 /// the discrete GPU for the whole process. Exported by the linker flags in
 /// build.rs; the values themselves are what the drivers read (#32).
@@ -114,6 +114,32 @@ error: {e:#}"
     if args.iter().any(|a| a == "--update") {
         attach_parent_console();
         std::process::exit(cli_update());
+    }
+    if args.iter().any(|a| a == "--imports") {
+        attach_parent_console();
+        let Some(first) = args.first().filter(|a| !a.starts_with('-')) else {
+            eprintln!("error: --imports needs a game exe or folder");
+            std::process::exit(1);
+        };
+        match game::resolve_target(&PathBuf::from(first)) {
+            Ok((exe, _)) => {
+                println!("{}", exe.display());
+                println!("  api read as: {}", game::detect_api(&exe).label());
+                let imports = game::pe_imports(&exe);
+                println!("  imports: {}", imports.join(", "));
+                for dll in ["d3d9.dll", "d3d11.dll", "d3d12.dll", "dxgi.dll"] {
+                    let fns = game::pe_import_fns(&exe, dll);
+                    if !fns.is_empty() {
+                        println!("  from {dll}: {}", fns.join(", "));
+                    }
+                }
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::exit(1);
+            }
+        }
     }
     if args.iter().any(|a| a == "--ignore-anticheat") {
         game::set_ignore_anticheat(true);

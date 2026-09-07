@@ -367,7 +367,13 @@ pub fn has_agility_redist(dir: &Path) -> Option<PathBuf> {
 
 /// True when the PE imports `d3d9.dll` for something other than the
 /// `D3DPERF_*` debug markers, i.e. it actually renders with Direct3D 9.
+///
+/// Direct3D 9 predates DXGI and never uses it, so importing `dxgi.dll` settles
+/// it on its own: that is a DXGI-era renderer creating its device at runtime.
 fn d3d9_is_the_renderer(pe: &Path) -> bool {
+    if pe_imports(pe).iter().any(|i| i == "dxgi.dll") {
+        return false;
+    }
     let fns = pe_import_fns(pe, "d3d9.dll");
     fns.is_empty() || fns.iter().any(|f| !f.starts_with("d3dperf_"))
 }
@@ -1007,6 +1013,11 @@ pub mod testutil {
     /// A minimal PE32+ with one import descriptor, so the import reader can be
     /// tested on a file whose contents are known exactly.
     pub fn make_pe_importing(path: &Path, dll: &str, fns: &[&str]) -> PathBuf {
+        make_pe_importing_many(path, &[(dll, fns)])
+    }
+
+    /// The same, with one descriptor per (DLL, functions) pair.
+    pub fn make_pe_importing_many(path: &Path, dlls: &[(&str, &[&str])]) -> PathBuf {
         // One section mapped 1:1 (RVA == file offset) keeps the maths trivial.
         const SEC: usize = 0x400;
         let mut img = vec![0u8; SEC];
@@ -1023,30 +1034,36 @@ pub mod testutil {
 
         let mut blob: Vec<u8> = Vec::new();
         let at = |b: &Vec<u8>| (SEC + b.len()) as u32;
-        // Names first, each preceded by its 2-byte hint.
-        let mut name_rvas = Vec::new();
-        for f in fns {
-            name_rvas.push(at(&blob));
-            blob.extend_from_slice(&0u16.to_le_bytes());
-            blob.extend_from_slice(f.as_bytes());
+        // Names and thunks first, one set per DLL; the descriptors follow.
+        let mut parts: Vec<(u32, u32)> = Vec::new(); // (dll name RVA, thunk RVA)
+        for (dll, fns) in dlls {
+            let mut name_rvas = Vec::new();
+            for f in *fns {
+                name_rvas.push(at(&blob));
+                blob.extend_from_slice(&0u16.to_le_bytes());
+                blob.extend_from_slice(f.as_bytes());
+                blob.push(0);
+            }
+            let dll_rva = at(&blob);
+            blob.extend_from_slice(dll.as_bytes());
             blob.push(0);
+            while !blob.len().is_multiple_of(8) {
+                blob.push(0);
+            }
+            let thunk_rva = at(&blob);
+            for r in &name_rvas {
+                blob.extend_from_slice(&(*r as u64).to_le_bytes());
+            }
+            blob.extend_from_slice(&0u64.to_le_bytes()); // terminator
+            parts.push((dll_rva, thunk_rva));
         }
-        let dll_rva = at(&blob);
-        blob.extend_from_slice(dll.as_bytes());
-        blob.push(0);
-        while !blob.len().is_multiple_of(8) {
-            blob.push(0);
-        }
-        let thunk_rva = at(&blob);
-        for r in &name_rvas {
-            blob.extend_from_slice(&(*r as u64).to_le_bytes());
-        }
-        blob.extend_from_slice(&0u64.to_le_bytes()); // terminator
         let desc_rva = at(&blob);
-        blob.extend_from_slice(&thunk_rva.to_le_bytes()); // OriginalFirstThunk
-        blob.extend_from_slice(&[0u8; 8]); // TimeDateStamp, ForwarderChain
-        blob.extend_from_slice(&dll_rva.to_le_bytes()); // Name
-        blob.extend_from_slice(&thunk_rva.to_le_bytes()); // FirstThunk
+        for (dll_rva, thunk_rva) in &parts {
+            blob.extend_from_slice(&thunk_rva.to_le_bytes()); // OriginalFirstThunk
+            blob.extend_from_slice(&[0u8; 8]); // TimeDateStamp, ForwarderChain
+            blob.extend_from_slice(&dll_rva.to_le_bytes()); // Name
+            blob.extend_from_slice(&thunk_rva.to_le_bytes()); // FirstThunk
+        }
         blob.extend_from_slice(&[0u8; 20]); // null descriptor
 
         // PE32+ data directories start at optional-header offset 112, and the
@@ -1229,6 +1246,17 @@ mod tests {
             &["Direct3DCreate9", "D3DPERF_BeginEvent"],
         );
         assert_eq!(detect_api(&real), Api::Dx9);
+
+        // Direct3D 9 predates DXGI, so a PE importing both is not a D3D9 game
+        // however it uses d3d9.dll - it creates its real device at runtime.
+        let dxgi = testutil::make_pe_importing_many(
+            &t.path().join("dxgi.exe"),
+            &[
+                ("d3d9.dll", &["Direct3DCreate9"][..]),
+                ("dxgi.dll", &["CreateDXGIFactory1"][..]),
+            ],
+        );
+        assert_eq!(detect_api(&dxgi), Api::Unknown);
     }
 
     #[test]
