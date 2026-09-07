@@ -148,6 +148,119 @@ impl Api {
 }
 
 /// Lower-cased DLL names from the exe's static import table. Empty on any parse problem.
+/// Every function name the PE imports from `dll` (lowercased).
+///
+/// Needed because importing `d3d9.dll` does not make a game a Direct3D 9 game:
+/// engines from the D3D9 era onward import it for the `D3DPERF_*` debug markers
+/// alone and render with something far newer, which is how RDR2 read as
+/// DirectX 9 (#53). A real D3D9 renderer calls `Direct3DCreate9`.
+pub fn pe_import_fns(exe: &Path, dll: &str) -> Vec<String> {
+    let Ok(data) = fs::read(exe) else {
+        return vec![];
+    };
+    let rd32 = |o: usize| -> Option<u32> {
+        data.get(o..o + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let rd64 = |o: usize| -> Option<u64> {
+        data.get(o..o + 8)
+            .map(|b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    };
+    let rd16 =
+        |o: usize| -> Option<u16> { data.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]])) };
+    let cstr = |off: usize| -> String {
+        let end = data[off..]
+            .iter()
+            .position(|&b| b == 0)
+            .map(|n| off + n)
+            .unwrap_or(off);
+        String::from_utf8_lossy(&data[off..end]).to_ascii_lowercase()
+    };
+    let parse = || -> Option<Vec<String>> {
+        if data.get(..2)? != b"MZ" {
+            return None;
+        }
+        let pe = rd32(0x3C)? as usize;
+        if data.get(pe..pe + 4)? != b"PE\0\0" {
+            return None;
+        }
+        let coff = pe + 4;
+        let nsec = rd16(coff + 2)? as usize;
+        let opt_size = rd16(coff + 16)? as usize;
+        let opt = coff + 20;
+        let magic = rd16(opt)?;
+        let (dd_off, pe32_plus) = match magic {
+            0x20B => (112, true),
+            0x10B => (96, false),
+            _ => return None,
+        };
+        let import_rva = rd32(opt + dd_off + 8)? as usize;
+        if import_rva == 0 {
+            return Some(vec![]);
+        }
+        let sec = opt + opt_size;
+        let mut sections = Vec::new();
+        for i in 0..nsec {
+            let s = sec + i * 40;
+            sections.push((
+                rd32(s + 12)? as usize,
+                rd32(s + 16)? as usize,
+                rd32(s + 20)? as usize,
+            ));
+        }
+        let to_off = |rva: usize| -> Option<usize> {
+            sections
+                .iter()
+                .find(|(va, size, _)| rva >= *va && rva < va + size)
+                .map(|(va, _, raw)| raw + (rva - va))
+        };
+        let want = dll.to_ascii_lowercase();
+        let mut out = Vec::new();
+        let mut desc = to_off(import_rva)?;
+        for _ in 0..512 {
+            let name_rva = rd32(desc + 12)? as usize;
+            if name_rva == 0 && rd32(desc)? == 0 {
+                break;
+            }
+            let is_ours = to_off(name_rva).map(&cstr).is_some_and(|n| n == want);
+            if is_ours {
+                // OriginalFirstThunk when present, else FirstThunk.
+                let thunk_rva = match rd32(desc)? {
+                    0 => rd32(desc + 16)? as usize,
+                    v => v as usize,
+                };
+                if let Some(mut t) = to_off(thunk_rva) {
+                    for _ in 0..4096 {
+                        let (entry, step) = if pe32_plus {
+                            (rd64(t)?, 8)
+                        } else {
+                            (rd32(t)? as u64, 4)
+                        };
+                        if entry == 0 {
+                            break;
+                        }
+                        let by_ordinal = if pe32_plus {
+                            entry & (1 << 63) != 0
+                        } else {
+                            entry & (1 << 31) != 0
+                        };
+                        if !by_ordinal {
+                            // IMAGE_IMPORT_BY_NAME: 2-byte hint, then the name.
+                            if let Some(off) = to_off(entry as usize & 0x7fff_ffff) {
+                                out.push(cstr(off + 2));
+                            }
+                        }
+                        t += step;
+                    }
+                }
+            }
+            desc += 20;
+        }
+        Some(out)
+    };
+    parse().unwrap_or_default()
+}
+
 pub fn pe_imports(exe: &Path) -> Vec<String> {
     let Ok(data) = fs::read(exe) else {
         return vec![];
@@ -252,9 +365,19 @@ pub fn has_agility_redist(dir: &Path) -> Option<PathBuf> {
     .find(|p| p.is_file())
 }
 
+/// True when the PE imports `d3d9.dll` for something other than the
+/// `D3DPERF_*` debug markers, i.e. it actually renders with Direct3D 9.
+fn d3d9_is_the_renderer(pe: &Path) -> bool {
+    let fns = pe_import_fns(pe, "d3d9.dll");
+    fns.is_empty() || fns.iter().any(|f| !f.starts_with("d3dperf_"))
+}
+
 pub fn detect_api(exe: &Path) -> Api {
     use classify_imports as classify;
-    let api = classify(&pe_imports(exe));
+    let mut api = classify(&pe_imports(exe));
+    if api == Api::Dx9 && !d3d9_is_the_renderer(exe) {
+        api = Api::Unknown;
+    }
     let agility_sdk = exe
         .parent()
         .is_some_and(|d| has_agility_redist(d).is_some());
@@ -300,8 +423,9 @@ pub fn detect_api(exe: &Path) -> Api {
             Api::Dx12 => return Api::Dx12,
             Api::Dx11 => seen_dx11 = true,
             // Aion renders through XRenderD3D9.dll rather than from the exe,
-            // so the renderer DLL is the only place the API shows (#16).
-            Api::Dx9 => seen_dx9 = true,
+            // so the renderer DLL is the only place the API shows (#16). The
+            // marker-only case is excluded here too (#53).
+            Api::Dx9 => seen_dx9 |= d3d9_is_the_renderer(&dll),
             Api::Dx10 | Api::Vulkan | Api::Unknown => {}
         }
     }
@@ -880,6 +1004,65 @@ pub mod testutil {
         path.to_path_buf()
     }
 
+    /// A minimal PE32+ with one import descriptor, so the import reader can be
+    /// tested on a file whose contents are known exactly.
+    pub fn make_pe_importing(path: &Path, dll: &str, fns: &[&str]) -> PathBuf {
+        // One section mapped 1:1 (RVA == file offset) keeps the maths trivial.
+        const SEC: usize = 0x400;
+        let mut img = vec![0u8; SEC];
+        img[..2].copy_from_slice(b"MZ");
+        img[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        let pe = 0x80usize;
+        img[pe..pe + 4].copy_from_slice(b"PE\0\0");
+        img[pe + 4..pe + 6].copy_from_slice(&PE_X64.to_le_bytes());
+        img[pe + 6..pe + 8].copy_from_slice(&1u16.to_le_bytes()); // 1 section
+        let opt_size: u16 = 240;
+        img[pe + 20..pe + 22].copy_from_slice(&opt_size.to_le_bytes());
+        let opt = pe + 24;
+        img[opt..opt + 2].copy_from_slice(&0x20Bu16.to_le_bytes()); // PE32+
+
+        let mut blob: Vec<u8> = Vec::new();
+        let at = |b: &Vec<u8>| (SEC + b.len()) as u32;
+        // Names first, each preceded by its 2-byte hint.
+        let mut name_rvas = Vec::new();
+        for f in fns {
+            name_rvas.push(at(&blob));
+            blob.extend_from_slice(&0u16.to_le_bytes());
+            blob.extend_from_slice(f.as_bytes());
+            blob.push(0);
+        }
+        let dll_rva = at(&blob);
+        blob.extend_from_slice(dll.as_bytes());
+        blob.push(0);
+        while !blob.len().is_multiple_of(8) {
+            blob.push(0);
+        }
+        let thunk_rva = at(&blob);
+        for r in &name_rvas {
+            blob.extend_from_slice(&(*r as u64).to_le_bytes());
+        }
+        blob.extend_from_slice(&0u64.to_le_bytes()); // terminator
+        let desc_rva = at(&blob);
+        blob.extend_from_slice(&thunk_rva.to_le_bytes()); // OriginalFirstThunk
+        blob.extend_from_slice(&[0u8; 8]); // TimeDateStamp, ForwarderChain
+        blob.extend_from_slice(&dll_rva.to_le_bytes()); // Name
+        blob.extend_from_slice(&thunk_rva.to_le_bytes()); // FirstThunk
+        blob.extend_from_slice(&[0u8; 20]); // null descriptor
+
+        // PE32+ data directories start at optional-header offset 112, and the
+        // import table is index 1, so it sits eight bytes further in.
+        img[opt + 120..opt + 124].copy_from_slice(&desc_rva.to_le_bytes());
+        // Section header: VirtualAddress == PointerToRawData == SEC.
+        let sh = opt + opt_size as usize;
+        img[sh + 8..sh + 12].copy_from_slice(&(blob.len() as u32).to_le_bytes()); // VirtualSize
+        img[sh + 12..sh + 16].copy_from_slice(&(SEC as u32).to_le_bytes()); // VirtualAddress
+        img[sh + 16..sh + 20].copy_from_slice(&(blob.len() as u32).to_le_bytes()); // SizeOfRawData
+        img[sh + 20..sh + 24].copy_from_slice(&(SEC as u32).to_le_bytes()); // PointerToRawData
+        img.extend_from_slice(&blob);
+        fs::write(path, &img).unwrap();
+        path.to_path_buf()
+    }
+
     pub fn make_reshade_dll(path: &Path) -> PathBuf {
         let mut b = b"MZ".to_vec();
         b.extend(std::iter::repeat_n(0u8, 1 << 20));
@@ -1021,6 +1204,33 @@ mod tests {
     /// A Vulkan-only game imports vulkan-1.dll and no Direct3D; the dxgi.dll
     /// proxy can never load in one, so it has to be named rather than
     /// reported as "API unknown, assuming DX12" (#6).
+    /// Red Dead Redemption 2 imports d3d9.dll only for the D3DPERF debug
+    /// markers and renders with something far newer, so v0.11.17's renderer
+    /// scan read it as a DirectX 9 game and refused to install (#53).
+    #[test]
+    fn d3d9_debug_markers_alone_are_not_a_d3d9_game() {
+        let t = tempfile::tempdir().unwrap();
+        let markers = testutil::make_pe_importing(
+            &t.path().join("markers.exe"),
+            "d3d9.dll",
+            &["D3DPERF_BeginEvent", "D3DPERF_EndEvent"],
+        );
+        assert_eq!(
+            pe_import_fns(&markers, "d3d9.dll"),
+            vec!["d3dperf_beginevent", "d3dperf_endevent"]
+        );
+        assert_eq!(pe_imports(&markers), vec!["d3d9.dll"]);
+        assert_eq!(detect_api(&markers), Api::Unknown);
+
+        // A real Direct3D 9 renderer still reads as one.
+        let real = testutil::make_pe_importing(
+            &t.path().join("real.exe"),
+            "d3d9.dll",
+            &["Direct3DCreate9", "D3DPERF_BeginEvent"],
+        );
+        assert_eq!(detect_api(&real), Api::Dx9);
+    }
+
     #[test]
     fn classify_imports_reads_d3d9() {
         // Aion imports d3d9.dll (through XRenderD3D9.dll) and nothing newer;
