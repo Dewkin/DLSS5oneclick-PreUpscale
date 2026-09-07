@@ -766,7 +766,14 @@ pub fn inspect(exe: &Path) -> Result<GameStatus> {
                 .into(),
         );
     }
-    let api = detect_api(exe);
+    let mut api = detect_api(exe);
+    // dgVoodoo2 is the route this tool tells D3D9 users to take: it presents the
+    // game as D3D11, which is what ReShade and the Feeder then attach to. Once it
+    // is in place the game is a D3D11 game at run time, so refusing it here left
+    // people who had followed the instructions with nowhere to go (Spore, #56).
+    if api == Api::Dx9 && is_dgvoodoo(d) {
+        api = Api::Dx11;
+    }
     if api == Api::Dx9 {
         problems.push(
             "This is a DirectX 9 game. DLSS needs a Direct3D 11 or 12 device, which D3D9 \
@@ -1477,6 +1484,30 @@ mod tests {
         let exe = make_pe(&t.path().join("game.exe"), PE_X64);
         assert!(pe_imports(&exe).is_empty());
         assert_eq!(detect_api(&exe), Api::Unknown);
+    }
+
+    /// A D3D9 game with dgVoodoo2 beside it is a D3D11 game at run time, and
+    /// that is the route the refusal text itself sends people to. Refusing it
+    /// anyway left Spore users stuck after doing exactly as told (#56).
+    #[test]
+    fn dgvoodoo_turns_a_d3d9_game_into_the_d3d11_path() {
+        std::env::set_var("DLSS5ONECLICK_SKIP_GPU_CHECK", "1");
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path();
+        let exe =
+            testutil::make_pe_importing(&d.join("SporeApp.exe"), "d3d9.dll", &["Direct3DCreate9"]);
+        assert_eq!(detect_api(&exe), Api::Dx9);
+        let st = inspect(&exe).unwrap();
+        assert_eq!(st.api, Api::Dx9);
+        assert!(st.problems.iter().any(|p| p.contains("DirectX 9 game")));
+
+        // dgVoodoo2 in place: no refusal, and the D3D11 path from there on.
+        fs::write(d.join("dgVoodoo.conf"), b"[General]").unwrap();
+        fs::write(d.join("d3d9.dll"), b"MZ...dgVoodoo2 wrapper...").unwrap();
+        let st = inspect(&exe).unwrap();
+        assert_eq!(st.api, Api::Dx11);
+        assert!(!st.problems.iter().any(|p| p.contains("DirectX 9 game")));
+        assert!(!st.problems.iter().any(|p| p.contains("d3d9.dll proxy")));
     }
 
     #[test]
