@@ -93,8 +93,8 @@ fn apply_traa_ui_patch(game_dir: &Path) -> Result<Option<String>> {
     if !dest.is_file() {
         return Ok(None);
     }
-    let mut text = fs::read_to_string(&dest)
-        .with_context(|| format!("reading {}", dest.display()))?;
+    let mut text =
+        fs::read_to_string(&dest).with_context(|| format!("reading {}", dest.display()))?;
     if text.contains(TRAA_UI_MARKER) {
         return Ok(Some(format!(
             "reshade-shaders/Shaders/{TRAA_FX} (UI protect, already applied)"
@@ -317,7 +317,6 @@ impl Latest {
         }
     }
 }
-
 
 /// Files that must exist after a successful Feeder/Native install.
 /// Used so the UI never says "Everything is in place" on a partial copy.
@@ -1139,7 +1138,9 @@ fn merge_dgvoodoo_conf(existing: &str) -> String {
                 vram_set = true;
                 continue;
             }
-            if section.eq_ignore_ascii_case("DirectX") && key.eq_ignore_ascii_case("dgVoodooWatermark") {
+            if section.eq_ignore_ascii_case("DirectX")
+                && key.eq_ignore_ascii_case("dgVoodooWatermark")
+            {
                 out.push_str("dgVoodooWatermark = false\n");
                 watermark_set = true;
                 continue;
@@ -1222,9 +1223,7 @@ fn assert_dgvoodoo_conf_healthy(text: &str) -> Result<()> {
         }
     }
     if !vram_ok {
-        bail!(
-            "dgVoodoo.conf health check failed: VRAM must be >= {DGVOODOO_VRAM_FLOOR}"
-        );
+        bail!("dgVoodoo.conf health check failed: VRAM must be >= {DGVOODOO_VRAM_FLOOR}");
     }
     Ok(())
 }
@@ -1235,11 +1234,10 @@ pub fn write_dgvoodoo_conf(game_dir: &Path) -> Result<()> {
     let conf = game_dir.join("dgVoodoo.conf");
     let bak = game_dir.join("dgVoodoo.conf.bak");
     let text = if conf.is_file() {
-        let existing = fs::read_to_string(&conf)
-            .with_context(|| format!("reading {}", conf.display()))?;
+        let existing =
+            fs::read_to_string(&conf).with_context(|| format!("reading {}", conf.display()))?;
         if !bak.is_file() {
-            fs::write(&bak, &existing)
-                .with_context(|| format!("writing {}", bak.display()))?;
+            fs::write(&bak, &existing).with_context(|| format!("writing {}", bak.display()))?;
         }
         merge_dgvoodoo_conf(&existing)
     } else {
@@ -1273,10 +1271,8 @@ pub fn install_dgvoodoo_from_zip(
         .find(|n| {
             let norm = n.replace('\\', "/");
             norm.eq_ignore_ascii_case(want)
-                || (bitness != 64
-                    && norm.to_ascii_lowercase().ends_with("/ms/x86/d3d9.dll"))
-                || (bitness == 64
-                    && norm.to_ascii_lowercase().ends_with("/ms/x64/d3d9.dll"))
+                || (bitness != 64 && norm.to_ascii_lowercase().ends_with("/ms/x86/d3d9.dll"))
+                || (bitness == 64 && norm.to_ascii_lowercase().ends_with("/ms/x64/d3d9.dll"))
         })
         .map(str::to_owned)
         .ok_or_else(|| {
@@ -2222,9 +2218,7 @@ pub fn uninstall_all(exe: &Path) -> Result<(Vec<String>, Option<String>)> {
     }
     if shaders_root.is_dir() {
         if leftover_shaders {
-            removed.push(
-                "reshade-shaders/ (left: shaders this tool did not install)".into(),
-            );
+            removed.push("reshade-shaders/ (left: shaders this tool did not install)".into());
         } else {
             fs::remove_dir_all(&shaders_root)?;
             removed.push("reshade-shaders/".into());
@@ -2296,10 +2290,7 @@ mod tests {
         let z = t.path().join("feeder.zip");
         write_zip(
             &z,
-            &[
-                (game::FEEDER_ADDON, b"addon"),
-                (game::FEEDER_FX, b"fx"),
-            ],
+            &[(game::FEEDER_ADDON, b"addon"), (game::FEEDER_FX, b"fx")],
             &[],
         );
         let out = copy_vulkan_feeder_kit_from_zip(&z, d, "v0.14.0").unwrap();
@@ -2549,7 +2540,6 @@ mod tests {
         let second = apply_traa_ui_patch(t.path()).unwrap().unwrap();
         assert!(second.contains("already applied"), "{second}");
     }
-
 
     #[test]
     fn single_from_zip_and_uninstall() {
@@ -2871,7 +2861,11 @@ RestoreComputeSignature=true
         fs::write(sh.join("Clarity.fx"), b"user shader").unwrap();
         // dgVoodoo for DX9 games must never be touched.
         fs::write(d.join("d3d9.dll"), b"MZ...dgVoodoo2 wrapper...").unwrap();
-        fs::write(d.join("dgVoodoo.conf"), b"[DirectX]\nOutputAPI = bestavailable\n").unwrap();
+        fs::write(
+            d.join("dgVoodoo.conf"),
+            b"[DirectX]\nOutputAPI = bestavailable\n",
+        )
+        .unwrap();
 
         let (removed, kept) = uninstall_all(&exe).unwrap();
         assert!(kept.is_none(), "{kept:?}");
@@ -2881,7 +2875,11 @@ RestoreComputeSignature=true
         assert!(!d.join("ReShade.ini").exists());
         assert!(!d.join("dlss5-feed.cfg").exists());
         assert!(!d.join(game::FEEDER_ADDON).is_file());
-        assert!(d.join("reshade-shaders").join("Shaders").join("Clarity.fx").is_file());
+        assert!(d
+            .join("reshade-shaders")
+            .join("Shaders")
+            .join("Clarity.fx")
+            .is_file());
         assert!(d.join("d3d9.dll").is_file(), "dgVoodoo d3d9.dll must stay");
         assert!(d.join("dgVoodoo.conf").is_file());
         assert!(!game::inspect(&exe).unwrap().reshade);

@@ -150,7 +150,8 @@ fn base_medium() -> ResolvedQuality {
         lighting_strength: 1.35,
         detail_threshold: 0.018,
         detail_strength: 1.40,
-        summary: "Medium: engine velocity hunt + Lumenite fallback, residual masks, work 85% + FSR".into(),
+        summary: "Medium: engine velocity hunt + Lumenite fallback, residual masks, work 85% + FSR"
+            .into(),
     }
 }
 
@@ -180,7 +181,8 @@ fn base_high() -> ResolvedQuality {
         lighting_strength: 1.50,
         detail_threshold: 0.012,
         detail_strength: 1.55,
-        summary: "High: engine velocity + Optical Flow fallback, stronger masks, full resolution".into(),
+        summary: "High: engine velocity + Optical Flow fallback, stronger masks, full resolution"
+            .into(),
     }
 }
 
@@ -372,15 +374,9 @@ pub fn feed_fx_uniforms(r: &ResolvedQuality) -> Vec<(&'static str, String)> {
             "LIGHTING_MASK",
             if r.lighting_mask { "1" } else { "0" }.into(),
         ),
-        (
-            "LIGHTING_THRESHOLD",
-            format!("{:.3}", r.lighting_threshold),
-        ),
+        ("LIGHTING_THRESHOLD", format!("{:.3}", r.lighting_threshold)),
         ("LIGHTING_STRENGTH", format!("{:.2}", r.lighting_strength)),
-        (
-            "DETAIL_MASK",
-            if r.detail_mask { "1" } else { "0" }.into(),
-        ),
+        ("DETAIL_MASK", if r.detail_mask { "1" } else { "0" }.into()),
         ("DETAIL_THRESHOLD", format!("{:.3}", r.detail_threshold)),
         ("DETAIL_STRENGTH", format!("{:.2}", r.detail_strength)),
     ]

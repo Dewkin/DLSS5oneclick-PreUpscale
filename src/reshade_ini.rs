@@ -168,7 +168,9 @@ fn normalize_search_path(raw: &str) -> String {
 }
 
 fn path_key(p: &str) -> String {
-    normalize_search_path(p).trim_end_matches(['\\', '/']).to_ascii_lowercase()
+    normalize_search_path(p)
+        .trim_end_matches(['\\', '/'])
+        .to_ascii_lowercase()
 }
 
 /// Collapse broken `\**\**` globs and ensure `required` is present (prepended if missing).

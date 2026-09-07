@@ -33,6 +33,7 @@ pub struct FeederKnobs {
 }
 
 impl Default for FeederKnobs {
+    /// Match Feeder stock (`g_cfg` + OFA/velocity/lightstab/diag + FX shader defaults).
     fn default() -> Self {
         Self {
             work_resolution: 100,
@@ -40,7 +41,7 @@ impl Default for FeederKnobs {
             work_sharpness: 0.30,
             ofa_enabled: false,
             ofa_grid: 2,
-            ofa_perf: 15,
+            ofa_perf: 10, // feed_ofa.h: { enabled=0, grid=2, perf=10 }
             reset_mode: 2,
             light_stab: false,
             light_stab_strength: 0.35,
@@ -50,9 +51,10 @@ impl Default for FeederKnobs {
             appearance_mask: true,
             lighting_mask: true,
             detail_mask: true,
-            appearance_threshold: 0.040,
-            lighting_threshold: 0.050,
-            detail_threshold: 0.022,
+            // DLSS5_Feed.fx uniform defaults
+            appearance_threshold: 0.035,
+            lighting_threshold: 0.040,
+            detail_threshold: 0.018,
             auto_profile: String::new(),
         }
     }
@@ -163,10 +165,10 @@ pub fn load(game_dir: &Path) -> Result<FeederKnobs> {
 
 fn set_line(lines: &mut Vec<String>, key: &str, value: String) {
     let prefix = format!("{key}=");
-    if let Some(i) = lines
-        .iter()
-        .position(|l| l.to_ascii_lowercase().starts_with(&prefix.to_ascii_lowercase()))
-    {
+    if let Some(i) = lines.iter().position(|l| {
+        l.to_ascii_lowercase()
+            .starts_with(&prefix.to_ascii_lowercase())
+    }) {
         lines[i] = format!("{key}={value}");
     } else {
         lines.push(format!("{key}={value}"));
@@ -184,7 +186,11 @@ pub fn save(game_dir: &Path, k: &FeederKnobs) -> Result<()> {
         quality_preset::feeder_cfg_text(&r)
     };
     let mut lines: Vec<String> = prev.lines().map(|l| l.to_string()).collect();
-    set_line(&mut lines, "work_resolution", k.work_resolution.clamp(50, 100).to_string());
+    set_line(
+        &mut lines,
+        "work_resolution",
+        k.work_resolution.clamp(50, 100).to_string(),
+    );
     set_line(&mut lines, "work_upscale", k.work_upscale.to_string());
     set_line(
         &mut lines,
@@ -243,14 +249,8 @@ pub fn save(game_dir: &Path, k: &FeederKnobs) -> Result<()> {
             "LIGHTING_MASK",
             if k.lighting_mask { "1" } else { "0" }.into(),
         ),
-        (
-            "LIGHTING_THRESHOLD",
-            format!("{:.3}", k.lighting_threshold),
-        ),
-        (
-            "DETAIL_MASK",
-            if k.detail_mask { "1" } else { "0" }.into(),
-        ),
+        ("LIGHTING_THRESHOLD", format!("{:.3}", k.lighting_threshold)),
+        ("DETAIL_MASK", if k.detail_mask { "1" } else { "0" }.into()),
         ("DETAIL_THRESHOLD", format!("{:.3}", k.detail_threshold)),
     ];
     reshade_ini::write_feed_fx_uniforms(game_dir, &fx)?;

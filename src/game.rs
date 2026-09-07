@@ -1201,9 +1201,7 @@ pub fn install_folder_mismatch(preferred_exe: &Path) -> Option<String> {
     let mut cur = ship_dir.parent();
     for _ in 0..4 {
         let Some(d) = cur else { break };
-        if (d.join(RESHADE_PROXY).is_file() || d.join(FEEDER_MARKER).is_file())
-            && d != ship_dir
-        {
+        if (d.join(RESHADE_PROXY).is_file() || d.join(FEEDER_MARKER).is_file()) && d != ship_dir {
             return Some(format!(
                 "ReShade/Feeder found in {} but not next to {} — Install on the Shipping exe",
                 d.display(),
@@ -1814,14 +1812,21 @@ mod tests {
         std::env::set_var("DLSS5ONECLICK_SKIP_GPU_CHECK", "1");
         let st = inspect(&exe).unwrap();
         assert_eq!(st.api, Api::Dx9);
-        assert!(st.needs_dgvoodoo(), "DX9 without dgVoodoo should need the install step");
+        assert!(
+            st.needs_dgvoodoo(),
+            "DX9 without dgVoodoo should need the install step"
+        );
         assert!(
             !st.problems.iter().any(|p| p.contains("DirectX 9")),
             "DX9 without dgVoodoo must not hard-block Install: {:?}",
             st.problems
         );
 
-        fs::write(d.join("dgVoodoo.conf"), b"[General]\nOutputAPI = bestavailable\n").unwrap();
+        fs::write(
+            d.join("dgVoodoo.conf"),
+            b"[General]\nOutputAPI = bestavailable\n",
+        )
+        .unwrap();
         let st = inspect(&exe).unwrap();
         assert_eq!(st.api, Api::Dx9);
         assert!(!st.needs_dgvoodoo());
@@ -1840,7 +1845,11 @@ mod tests {
             return;
         }
         std::env::set_var("DLSS5ONECLICK_SKIP_GPU_CHECK", "1");
-        assert_eq!(detect_api(exe), Api::Dx9, "Gothic3.exe must classify as DX9");
+        assert_eq!(
+            detect_api(exe),
+            Api::Dx9,
+            "Gothic3.exe must classify as DX9"
+        );
         assert_eq!(detect_api(exe).label(), "DX9");
         let st = inspect(exe).unwrap();
         assert_eq!(st.api, Api::Dx9);
@@ -1884,7 +1893,11 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let d = t.path();
         assert!(!is_dgvoodoo(d));
-        fs::write(d.join("dgVoodoo.conf"), b"[General]\nOutputAPI = bestavailable\n").unwrap();
+        fs::write(
+            d.join("dgVoodoo.conf"),
+            b"[General]\nOutputAPI = bestavailable\n",
+        )
+        .unwrap();
         assert!(is_dgvoodoo(d));
     }
 

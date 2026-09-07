@@ -332,7 +332,6 @@ impl App {
         }
     }
 
-
     fn apply_settings_to_game(&mut self) {
         let Some(exe) = self.exe() else { return };
         let Some(dir) = exe.parent().map(|p| p.to_path_buf()) else {
@@ -371,7 +370,6 @@ impl App {
             Err(e) => self.knobs_err = Some(format!("{e:#}")),
         }
     }
-
 
     fn start_renodx_lookup(&mut self) {
         let Some(exe) = self.exe() else {
@@ -588,11 +586,7 @@ impl App {
     /// Install / Update from a Games card: resolve Shipping exe, keep progress on the card.
     fn update_game(&mut self, path: PathBuf, index: usize) {
         // Prefer the canonical Shipping exe from meta when we already inspected it.
-        let target = self
-            .meta
-            .get(&index)
-            .map(|m| m.exe.clone())
-            .unwrap_or(path);
+        let target = self.meta.get(&index).map(|m| m.exe.clone()).unwrap_or(path);
         self.exe_text = target.to_string_lossy().into_owned();
         self.refresh();
         if let Some(Ok(st)) = &self.status {
@@ -1496,8 +1490,7 @@ impl App {
                     3.0,
                     if on { t::ACCENT } else { t::TEXT_DIM },
                 );
-                let galley =
-                    p.layout_no_wrap(label.to_owned(), t::plex_medium(10.5), t::TEXT_SOFT);
+                let galley = p.layout_no_wrap(label.to_owned(), t::plex_medium(10.5), t::TEXT_SOFT);
                 p.galley(
                     egui::pos2(x + 11.0, cy - galley.size().y / 2.0),
                     galley.clone(),
@@ -1573,8 +1566,12 @@ impl App {
                     caps.push_str(&format!("\nWarning: {w}"));
                 }
             }
-            resp.clone()
-                .on_hover_text(format!("{}{}\n{}{stale}{caps}", g.title, caps, g.dir.display()));
+            resp.clone().on_hover_text(format!(
+                "{}{}\n{}{stale}{caps}",
+                g.title,
+                caps,
+                g.dir.display()
+            ));
         }
         // Being installed right now: dim the poster, say so, and show how far
         // along it is, right where the user asked for it.
@@ -1646,18 +1643,14 @@ impl App {
                 egui::pos2(poster.left() + 10.0, poster.bottom() - btn_h - 30.0),
                 Vec2::new(poster.width() - 20.0, btn_h),
             );
-            let btn_resp = ui.interact(
-                btn,
-                ui.id().with(("card_install", i)),
-                egui::Sense::click(),
-            );
+            let btn_resp =
+                ui.interact(btn, ui.id().with(("card_install", i)), egui::Sense::click());
             let fill = if btn_resp.hovered() {
                 t::ACCENT
             } else {
                 Color32::from_black_alpha(200)
             };
-            ui.painter()
-                .rect_filled(btn, CornerRadius::same(7), fill);
+            ui.painter().rect_filled(btn, CornerRadius::same(7), fill);
             ui.painter().rect_stroke(
                 btn,
                 CornerRadius::same(7),
@@ -1703,14 +1696,12 @@ impl App {
     }
 
     fn settings_page(&mut self, ui: &mut egui::Ui) {
-        ui.label(
-            RichText::new("Settings")
-                .font(t::sora(16.0))
-                .color(t::TEXT),
-        );
+        ui.label(RichText::new("Settings").font(t::sora(16.0)).color(t::TEXT));
         ui.label(
             RichText::new(
-                "Defaults applied on new Install. Optional: apply to the game open on Setup.",
+                "User install defaults — saved to settings.json and applied on new Install \
+                 (optional: Apply to the game open on Setup). Separate from Feeder built-in \
+                 defaults (what the add-on writes when no dlss5-feed.cfg exists).",
             )
             .font(t::plex(12.0))
             .color(t::TEXT_MUTED),
@@ -1718,7 +1709,7 @@ impl App {
         ui.add_space(10.0);
 
         ui.label(
-            RichText::new("Quality seed")
+            RichText::new("Quality seed (user install)")
                 .font(t::plex_semibold(13.0))
                 .color(t::TEXT),
         );
@@ -1738,9 +1729,16 @@ impl App {
 
         ui.add_space(8.0);
         ui.label(
-            RichText::new("Feeder knobs defaults")
+            RichText::new("Feeder knobs (user install overrides)")
                 .font(t::plex_semibold(13.0))
                 .color(t::TEXT),
+        );
+        ui.label(
+            RichText::new(
+                "Unset sliders follow the quality seed. Explicit values override on Install.",
+            )
+            .font(t::plex(11.0))
+            .color(t::TEXT_DIM),
         );
         {
             let k = &mut self.settings.knobs;
@@ -1777,20 +1775,16 @@ impl App {
 
         ui.add_space(8.0);
         ui.label(
-            RichText::new("Overlay UX defaults")
+            RichText::new("Overlay UX (user install)")
                 .font(t::plex_semibold(13.0))
                 .color(t::TEXT),
         );
-        ui.add(
-            egui::Slider::new(&mut self.settings.overlay.log_detail, 0..=2).text("log_detail"),
-        );
+        ui.add(egui::Slider::new(&mut self.settings.overlay.log_detail, 0..=2).text("log_detail"));
         ui.add(
             egui::Slider::new(&mut self.settings.overlay.evaluate_stride, 1..=4)
                 .text("evaluate_stride"),
         );
-        ui.add(
-            egui::Slider::new(&mut self.settings.overlay.log_frames, 0..=20).text("log_frames"),
-        );
+        ui.add(egui::Slider::new(&mut self.settings.overlay.log_frames, 0..=20).text("log_frames"));
 
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -1809,7 +1803,26 @@ impl App {
                 let _ = self.settings.save();
                 self.apply_settings_to_game();
             }
+            if ui
+                .button("Reset to Feeder defaults")
+                .on_hover_text(
+                    "Restore form to Feeder stock: work_resolution=100, ofa off (grid 2 / perf 10), \
+                     reset_mode=2 adaptive, light_stab off, engine_velocity on, overlay log_detail=1 / \
+                     evaluate_stride=1 / log_frames=3, quality Auto.",
+                )
+                .clicked()
+            {
+                self.settings.reset_to_feeder_defaults();
+            }
         });
+        ui.label(
+            RichText::new(
+                "Feeder built-in defaults = stock add-on cfg (not your settings.json). \
+                 Reset above copies those into this form; Save to persist.",
+            )
+            .font(t::plex(11.0))
+            .color(t::TEXT_DIM),
+        );
         ui.label(
             RichText::new(format!("File: {}", Settings::path().display()))
                 .font(t::mono(11.0))
@@ -1853,13 +1866,12 @@ impl App {
                 .changed();
             changed |= wr;
             let sharp = ui
-                .add(
-                    egui::Slider::new(&mut k.work_sharpness, 0.0..=1.0)
-                        .text("work_sharpness"),
-                )
+                .add(egui::Slider::new(&mut k.work_sharpness, 0.0..=1.0).text("work_sharpness"))
                 .changed();
             changed |= sharp;
-            changed |= ui.checkbox(&mut k.ofa_enabled, "Optical Flow (ofa)").changed();
+            changed |= ui
+                .checkbox(&mut k.ofa_enabled, "Optical Flow (ofa)")
+                .changed();
             if k.ofa_enabled {
                 changed |= ui
                     .add(egui::Slider::new(&mut k.ofa_grid, 0..=4).text("ofa_grid"))
@@ -3118,10 +3130,7 @@ pub fn run() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1100.0, 780.0])
         .with_min_inner_size([880.0, 620.0])
-        .with_title(concat!(
-            "DLSS5oneclick ",
-            env!("CARGO_PKG_VERSION"),
-        ));
+        .with_title(concat!("DLSS5oneclick ", env!("CARGO_PKG_VERSION"),));
     if let Some(icon) = logo::icon_data() {
         viewport = viewport.with_icon(icon);
     }
