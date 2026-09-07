@@ -157,20 +157,37 @@ fn ensure_define(raw: &str, define: &str) -> String {
     join_list(&items)
 }
 
-/// Create/update ReShade.ini: search paths + PresetPath defaults, provider define forced.
+/// Add `path` to a search-path list if it is not already in it, keeping whatever
+/// the user (or an earlier ReShade install) already had.
+///
+/// A pre-existing `ReShade.ini` used to be left alone here, so a game that already
+/// had ReShade kept search paths pointing somewhere else and never found the
+/// shaders this tool installs -- ReShade then said "no effect files found" and the
+/// only way out was to copy them by hand (#4).
+fn ensure_path(raw: &str, path: &str) -> String {
+    let mut items = split_list(raw);
+    if items
+        .iter()
+        .any(|p| p.eq_ignore_ascii_case(path) || p.trim().eq_ignore_ascii_case(path))
+    {
+        return join_list(&items);
+    }
+    items.push(path.to_owned());
+    join_list(&items)
+}
+
+/// Create/update ReShade.ini: our search paths are always present, PresetPath
+/// defaults, provider define forced.
 pub fn write_reshade_ini(game_dir: &Path) -> Result<()> {
     let p = game_dir.join("ReShade.ini");
     let mut ini = Ini::load(&p);
-    ini.set_default(
-        "GENERAL",
-        "EffectSearchPaths",
-        r".\reshade-shaders\Shaders\**",
-    );
-    ini.set_default(
-        "GENERAL",
-        "TextureSearchPaths",
-        r".\reshade-shaders\Textures\**",
-    );
+    for (key, path) in [
+        ("EffectSearchPaths", r".\reshade-shaders\Shaders\**"),
+        ("TextureSearchPaths", r".\reshade-shaders\Textures\**"),
+    ] {
+        let merged = ensure_path(ini.get("GENERAL", key).unwrap_or(""), path);
+        ini.set("GENERAL", key, &merged);
+    }
     ini.set_default("GENERAL", "PresetPath", r".\ReShadePreset.ini");
     let defs = ensure_define(
         ini.get("GENERAL", "PreprocessorDefinitions").unwrap_or(""),
@@ -271,6 +288,37 @@ mod tests {
         assert!(split_list("").is_empty());
     }
 
+    /// A game that already had ReShade kept its own search paths and never saw
+    /// the shaders this tool installed; the reporter had to copy them by hand
+    /// (#4). Ours is now appended to whatever is already there.
+    #[test]
+    fn existing_search_paths_keep_theirs_and_gain_ours() {
+        let t = tempfile::tempdir().unwrap();
+        fs::write(
+            t.path().join("ReShade.ini"),
+            "[GENERAL]\nEffectSearchPaths=D:\\my shaders\\**\nTextureSearchPaths=D:\\my textures\n",
+        )
+        .unwrap();
+        write_reshade_ini(t.path()).unwrap();
+        let ini = Ini::load(&t.path().join("ReShade.ini"));
+        let fx = ini.get("GENERAL", "EffectSearchPaths").unwrap().to_owned();
+        assert!(fx.contains(r"D:\my shaders\**"), "{fx}");
+        assert!(fx.contains(r".\reshade-shaders\Shaders\**"), "{fx}");
+        let tx = ini.get("GENERAL", "TextureSearchPaths").unwrap().to_owned();
+        assert!(tx.contains(r"D:\my textures"), "{tx}");
+        assert!(tx.contains(r".\reshade-shaders\Textures\**"), "{tx}");
+
+        // Running it twice must not duplicate our entry.
+        write_reshade_ini(t.path()).unwrap();
+        let ini = Ini::load(&t.path().join("ReShade.ini"));
+        let fx = ini.get("GENERAL", "EffectSearchPaths").unwrap();
+        assert_eq!(
+            fx.matches(r".\reshade-shaders\Shaders\**").count(),
+            1,
+            "{fx}"
+        );
+    }
+
     #[test]
     fn reshade_ini_fresh() {
         let t = tempfile::tempdir().unwrap();
@@ -304,9 +352,11 @@ mod tests {
         .unwrap();
         write_reshade_ini(t.path()).unwrap();
         let ini = Ini::load(&t.path().join("ReShade.ini"));
+        // The user's own path stays, and ours joins it — keeping only theirs
+        // meant the shaders this tool installs were never found (#4).
         assert_eq!(
-            ini.get("GENERAL", "EffectSearchPaths"),
-            Some(".\\custom\\**")
+            split_list(ini.get("GENERAL", "EffectSearchPaths").unwrap()),
+            vec![".\\custom\\**", ".\\reshade-shaders\\Shaders\\**"]
         );
         assert_eq!(
             split_list(ini.get("GENERAL", "PreprocessorDefinitions").unwrap()),
