@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod diagnose;
+mod feeder_cfg;
 mod game;
 mod gpu;
 mod gpupref;
@@ -10,8 +11,10 @@ mod library;
 mod logo;
 mod net;
 mod ngx;
+mod quality_preset;
 mod renodx;
 mod reshade_ini;
+mod settings;
 mod text;
 mod theme;
 mod update;
@@ -422,7 +425,19 @@ fn cli(
             Error => println!("\n      FAILED: {detail}"),
         }
     };
-    match installer::run_all_with(&exe, engine, with_renodx, upstream, &progress, &step) {
+    let s = settings::Settings::load();
+    match installer::run_all_with(
+        &exe,
+        engine,
+        with_renodx,
+        upstream,
+        installer::InstallOpts {
+            quality: s.quality_choice(),
+            overrides: s.quality_overrides(),
+        },
+        &progress,
+        &step,
+    ) {
         Ok(_) => {
             if engine == installer::Engine::Opti {
                 println!(
