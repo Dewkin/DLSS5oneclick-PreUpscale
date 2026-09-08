@@ -10,6 +10,7 @@ use crate::logo;
 use crate::net;
 use crate::quality_preset::QualityChoice;
 use crate::renodx;
+use crate::reshade_ini;
 use crate::settings::Settings;
 use crate::text;
 use crate::theme::{self as t};
@@ -84,6 +85,9 @@ pub struct App {
     /// ReShade engine: run the experimental neural-upstream consumer instead of
     /// the stable RenoDX DLSS 5 add-on.
     upstream_on: bool,
+    /// neural-upstream strength preset to write into ReShade.ini before the
+    /// game starts (#68). 3 = Reference, the add-on's own default.
+    upstream_preset: u8,
     renodx: RenodxLookup,
     renodx_rx: Option<Receiver<RenodxLookup>>,
     /// Exe the current lookup belongs to, so a refresh does not re-fetch.
@@ -230,6 +234,7 @@ impl App {
             renodx_on: false,
             working_scale: 1.0,
             upstream_on: false,
+            upstream_preset: 3,
             renodx: RenodxLookup::Idle,
             renodx_rx: None,
             renodx_for: None,
@@ -410,6 +415,14 @@ impl App {
         std::env::set_var(
             installer::WORKING_SCALE_ENV,
             format!("{:.2}", self.working_scale),
+        );
+        std::env::set_var(
+            installer::UPSTREAM_PRESET_ENV,
+            if upstream {
+                self.upstream_preset.to_string()
+            } else {
+                "0".to_owned()
+            },
         );
         let (tx, rx): (Sender<Msg>, Receiver<Msg>) = channel();
         self.rx = Some(rx);
@@ -2874,6 +2887,46 @@ impl eframe::App for App {
                         self.upstream_on = true;
                     }
                     if self.upstream_on {
+                        ui.add_space(6.0);
+                        // The add-on reads these from ReShade.ini at startup, so
+                        // the choice can be made here rather than only in the
+                        // in-game overlay (#68).
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            ui.label(
+                                RichText::new("HOW TRANSFORMATIVE")
+                                    .font(t::plex_semibold(11.0))
+                                    .color(t::TEXT_MUTED),
+                            );
+                            let current = reshade_ini::UPSTREAM_PRESETS
+                                .iter()
+                                .find(|(_, id, _)| *id == self.upstream_preset)
+                                .map(|(n, ..)| *n)
+                                .unwrap_or("Reference");
+                            egui::ComboBox::from_id_salt("upstream_preset")
+                                .selected_text(RichText::new(current).font(t::plex(12.0)))
+                                .width(150.0)
+                                .show_ui(ui, |ui| {
+                                    for (name, id, _) in reshade_ini::UPSTREAM_PRESETS {
+                                        ui.selectable_value(
+                                            &mut self.upstream_preset,
+                                            id,
+                                            RichText::new(name).font(t::plex(12.0)),
+                                        );
+                                    }
+                                });
+                            ui.label(
+                                RichText::new(match self.upstream_preset {
+                                    1 => "Keeps the lighting work, holds back invented detail.",
+                                    2 => "Half way: detail is enhanced but not rebuilt.",
+                                    4 => "Past what the network intends \u{2014} detail starts looking drawn.",
+                                    5 => "Deliberately overcooked: waxy skin, invented surfaces.",
+                                    _ => "Everything the network wants to do. Its own default.",
+                                })
+                                .font(t::plex(11.0))
+                                .color(t::TEXT_DIM),
+                            );
+                        });
                         ui.add_space(6.0);
                         let warn = "EXPERIMENTAL. Using DLSS Frame Generation? Set this add-on to \
                                     Quality in the ReShade overlay, so the network runs on every \

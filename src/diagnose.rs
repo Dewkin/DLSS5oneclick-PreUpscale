@@ -154,12 +154,23 @@ pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
     }
 
     // ── ReShade side ────────────────────────────────────────────────
-    let Some(rs) = read(d, "ReShade.log").or_else(|| read(d, "ReShade2.log")) else {
-        out.push(bad(
+    // The DLSS 5 add-on runs under the ReShade in `consumer_dir()`: beside the
+    // exe for a 64-bit game, in host64\ for a 32-bit one. Reading the game
+    // folder's log for a 32-bit game reads the *feeder's* 32-bit ReShade, which
+    // never loads the add-on, so every 32-bit report came back "the add-on
+    // never registered" no matter how healthy the install was (#69).
+    let Some(rs) = read(&consumer, "ReShade.log").or_else(|| read(&consumer, "ReShade2.log"))
+    else {
+        out.push(bad(if st.is32() {
+            "No host64\\ReShade.log: the 64-bit helper's ReShade never loaded, which is what \
+             \"host lost: pipe never appeared\" in dlss5-feed.log means. Look in \
+             host64\\dlss5-feed-host.log for the reason, and check antivirus did not remove \
+             anything from host64\\."
+        } else {
             "No ReShade.log next to the game exe: ReShade never loaded. Either the game was not \
              started since the install, or it does not load dxgi.dll (wrong exe picked, or a \
-             launcher starts a different one). Check the exe with --check.",
-        ));
+             launcher starts a different one). Check the exe with --check."
+        }));
         return out;
     };
     if rs.contains("Initializing crosire's ReShade") {
@@ -185,10 +196,15 @@ pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
     } else if rs.contains("DLSS 5 Neural Rendering") {
         out.push(ok("The DLSS 5 Neural Rendering add-on registered."));
     } else {
-        out.push(bad(
-            "The DLSS 5 add-on never registered. renodx-dlss5.addon64 is missing from the game \
-             folder, disabled in ReShade's Add-ons tab, or quarantined by antivirus.",
-        ));
+        out.push(bad(format!(
+            "The DLSS 5 add-on never registered. renodx-dlss5.addon64 is missing from {}, \
+             disabled in ReShade's Add-ons tab, or quarantined by antivirus.",
+            if st.is32() {
+                "host64\\ (where a 32-bit game's add-on lives)"
+            } else {
+                "the game folder"
+            }
+        )));
     }
     if rs.contains("NR toggled ON") && !rs.contains("NR toggled OFF") {
         out.push(ok("Neural rendering was toggled ON (F6)."));
@@ -252,7 +268,7 @@ pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
     // A game with more than one executable (a Vulkan build and a DX11 build,
     // a launcher and the game) can be installed for one and played through
     // another: ReShade loads, everything looks right, nothing is hooked (#33).
-    if let Some(loaded) = reshade_host_exe(&rs) {
+    if let Some(loaded) = reshade_host_exe(&rs).filter(|_| !st.is32()) {
         let ours = st
             .exe
             .file_name()
@@ -447,6 +463,57 @@ mod tests {
             fs::write(t.path().join(game::DLSS_DLL), b"x").unwrap();
         }
         (t, exe)
+    }
+
+    /// A 32-bit game runs the add-on under the 64-bit ReShade in host64\, so
+    /// that is the log to read. Reading the game folder's log — the feeder's
+    /// own 32-bit ReShade, which never loads the add-on — reported "the add-on
+    /// never registered" on installs that were fine (#69).
+    #[test]
+    fn thirty_two_bit_reads_the_host64_reshade_log() {
+        std::env::set_var("DLSS5ONECLICK_SKIP_GPU_CHECK", "1");
+        let t = tempfile::tempdir().unwrap();
+        let exe = make_pe(&t.path().join("game.exe"), game::PE_X86);
+        let host = t.path().join(game::HOST_DIR);
+        fs::create_dir_all(&host).unwrap();
+        // The 32-bit ReShade beside the exe: no add-on, and never will have one.
+        fs::write(
+            t.path().join("ReShade.log"),
+            "Initializing crosire's ReShade version '6.8.0'\n",
+        )
+        .unwrap();
+        // The one that matters, in host64\.
+        fs::write(
+            host.join("ReShade.log"),
+            "Initializing crosire's ReShade version '6.8.0'\nRegistered add-on \"DLSS 5 Neural Rendering\"\n",
+        )
+        .unwrap();
+        let f = run(&exe).unwrap();
+        assert!(
+            f.iter()
+                .any(|x| x.level == Level::Ok && x.text.contains("add-on registered")),
+            "{f:?}"
+        );
+        assert!(
+            !f.iter().any(|x| x.text.contains("never registered")),
+            "{f:?}"
+        );
+    }
+
+    /// And when host64\ has no ReShade log at all, say so in host64 terms
+    /// rather than claiming ReShade never loaded beside the exe.
+    #[test]
+    fn thirty_two_bit_missing_host64_log_names_host64() {
+        std::env::set_var("DLSS5ONECLICK_SKIP_GPU_CHECK", "1");
+        let t = tempfile::tempdir().unwrap();
+        let exe = make_pe(&t.path().join("game.exe"), game::PE_X86);
+        fs::write(
+            t.path().join("ReShade.log"),
+            "Initializing crosire's ReShade version '6.8.0'\n",
+        )
+        .unwrap();
+        let f = run(&exe).unwrap();
+        assert!(f.iter().any(|x| x.text.contains("host64")), "{f:?}");
     }
 
     #[test]

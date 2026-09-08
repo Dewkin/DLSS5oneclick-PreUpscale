@@ -1819,7 +1819,35 @@ fn step_upstream(
         game::UPSTREAM_ADDON,
         progress,
     )?;
-    Ok(vec![game::UPSTREAM_ADDON.into()])
+    let mut done = vec![game::UPSTREAM_ADDON.to_owned()];
+    // The add-on reads its strength from ReShade.ini at startup, so the choice
+    // can be made here instead of only in the in-game overlay (#68).
+    let preset = upstream_preset();
+    if preset != 0 {
+        reshade_ini::write_upstream_preset(st.game_dir(), preset)?;
+        if let Some((name, ..)) = reshade_ini::UPSTREAM_PRESETS
+            .iter()
+            .find(|(_, id, _)| *id == preset)
+        {
+            done.push(format!("neural-upstream preset: {name}"));
+        }
+    }
+    Ok(done)
+}
+
+/// Which neural-upstream strength preset to seed; 0 leaves the overlay's own.
+pub const UPSTREAM_PRESET_ENV: &str = "DLSS5ONECLICK_UPSTREAM_PRESET";
+
+fn upstream_preset() -> u8 {
+    std::env::var(UPSTREAM_PRESET_ENV)
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .filter(|p| {
+            reshade_ini::UPSTREAM_PRESETS
+                .iter()
+                .any(|(_, id, _)| id == p)
+        })
+        .unwrap_or(0)
 }
 
 /// Active quality resolution for the install currently running (set by `run_all_with`).

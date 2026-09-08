@@ -280,6 +280,42 @@ pub fn write_traa_ui_defaults(game_dir: &Path) -> Result<()> {
     ini.save(&p)
 }
 
+/// neural-upstream's strength presets, exactly as its own `apply_preset()`
+/// defines them: `(label, id, [intensity, local tone, local structure, skin
+/// structure])`. Skin structure -1 means "follow local structure".
+pub const UPSTREAM_PRESETS: [(&str, u8, [f32; 4]); 5] = [
+    ("Light", 1, [0.45, 0.55, 0.25, 0.15]),
+    ("Moderate", 2, [0.70, 0.80, 0.55, 0.40]),
+    ("Reference", 3, [1.00, 1.00, 1.00, -1.00]),
+    ("Overdrive", 4, [1.30, 1.25, 1.45, 1.20]),
+    ("AI slop", 5, [1.80, 1.60, 2.00, 1.90]),
+];
+
+/// Seeds neural-upstream's strength preset before the game starts (#68).
+///
+/// The add-on reads its settings from `ReShade.ini`'s `[NRPreUpscale]` section
+/// through `reshade::get_config_value`, so they can be chosen from here rather
+/// than only in the in-game overlay. It reads `Preset` for the label and the
+/// four strength values as separate keys, and does **not** derive one from the
+/// other, so both go in — with the values its own `apply_preset()` would set.
+pub fn write_upstream_preset(game_dir: &Path, preset: u8) -> Result<()> {
+    let Some((_, id, v)) = UPSTREAM_PRESETS.iter().find(|(_, id, _)| *id == preset) else {
+        return Ok(()); // 0 = custom: leave whatever the user set in the overlay
+    };
+    let p = game_dir.join("ReShade.ini");
+    let mut ini = Ini::load(&p);
+    ini.set("NRPreUpscale", "Preset", id.to_string());
+    for (key, val) in [
+        ("Intensity", v[0]),
+        ("LocalTone", v[1]),
+        ("LocalStructure", v[2]),
+        ("SkinStructure", v[3]),
+    ] {
+        ini.set("NRPreUpscale", key, format!("{val:.6}"));
+    }
+    ini.save(&p)
+}
+
 /// ReShade keeps a per-game `[ADDON] DisabledAddons=` list (entries are
 /// `Name`, `Name@file` or `@file`). A stray disable hides the DLSS 5 panel, so
 /// an install drops our add-ons from that list.
@@ -335,6 +371,42 @@ pub fn remove_our_techniques(game_dir: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The preset has to reach the add-on as both the label and the four
+    /// values: neural-upstream reads them as separate keys and never derives
+    /// one from the other, so writing `Preset` alone would show "Light" in the
+    /// overlay while the network still ran at Reference strength (#68).
+    #[test]
+    fn upstream_preset_writes_label_and_values() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::write(
+            t.path().join("ReShade.ini"),
+            "[GENERAL]\nEffectSearchPaths=.\\reshade-shaders\\Shaders\\**\n",
+        )
+        .unwrap();
+        write_upstream_preset(t.path(), 1).unwrap();
+        let out = std::fs::read_to_string(t.path().join("ReShade.ini")).unwrap();
+        let ini = Ini::parse(&out);
+        assert_eq!(ini.get("NRPreUpscale", "Preset"), Some("1"));
+        assert_eq!(ini.get("NRPreUpscale", "Intensity"), Some("0.450000"));
+        assert_eq!(ini.get("NRPreUpscale", "LocalTone"), Some("0.550000"));
+        assert_eq!(ini.get("NRPreUpscale", "LocalStructure"), Some("0.250000"));
+        assert_eq!(ini.get("NRPreUpscale", "SkinStructure"), Some("0.150000"));
+        // Whatever else was in the file is still there.
+        assert!(ini.get("GENERAL", "EffectSearchPaths").is_some(), "{out}");
+
+        // Reference keeps the add-on's "follow local structure" sentinel.
+        write_upstream_preset(t.path(), 3).unwrap();
+        let out = std::fs::read_to_string(t.path().join("ReShade.ini")).unwrap();
+        let ini = Ini::parse(&out);
+        assert_eq!(ini.get("NRPreUpscale", "Preset"), Some("3"));
+        assert_eq!(ini.get("NRPreUpscale", "SkinStructure"), Some("-1.000000"));
+
+        // 0 is "custom": the overlay's own settings are left alone.
+        write_upstream_preset(t.path(), 0).unwrap();
+        let ini = Ini::parse(&std::fs::read_to_string(t.path().join("ReShade.ini")).unwrap());
+        assert_eq!(ini.get("NRPreUpscale", "Preset"), Some("3"));
+    }
     use super::*;
 
     #[test]
