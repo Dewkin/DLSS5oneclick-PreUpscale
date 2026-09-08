@@ -549,6 +549,12 @@ fn step_opti(
         if let Some(patched) = set_dlss_nr_enabled(&cur) {
             cur = patched;
         }
+        // The frame stays full size; only the model's own work is done small and
+        // enlarged, and its cost falls with the square of this. The single
+        // biggest performance lever on this route.
+        if let Some(patched) = set_ini_key(&cur, "DlssNr", "WorkingScale", &working_scale()) {
+            cur = patched;
+        }
         // RE Engine trips its own scheduler assertion unless the compute root
         // signature is put back, and fights REFramework over WndProc unless
         // input is polled. The graphics-side restores must stay off there: they
@@ -807,6 +813,18 @@ pub fn set_load_reshade(ini: &str) -> Option<String> {
         changed = true;
     }
     changed.then_some(out)
+}
+
+/// Fraction of the frame the DLSS 5 model works at, as OptiScaler's
+/// `[DlssNr] WorkingScale` wants it. Set through the UI; `1` when unset.
+pub const WORKING_SCALE_ENV: &str = "DLSS5ONECLICK_WORKING_SCALE";
+
+/// Reads the chosen model resolution, falling back to full size.
+fn working_scale() -> String {
+    std::env::var(WORKING_SCALE_ENV)
+        .ok()
+        .filter(|v| v.parse::<f32>().is_ok_and(|f| (0.25..=2.0).contains(&f)))
+        .unwrap_or_else(|| "1.0".to_owned())
 }
 
 /// `[DlssNr] Enabled=true` in OptiScaler.ini; `None` when it already says so.
@@ -2689,6 +2707,26 @@ X=1
 RestoreComputeSignature=true
 "
         ));
+    }
+
+    /// The model-resolution dial is the biggest performance lever on the
+    /// OptiScaler route: cost falls with the square of WorkingScale.
+    #[test]
+    fn working_scale_is_written_and_bounded() {
+        std::env::remove_var(WORKING_SCALE_ENV);
+        assert_eq!(working_scale(), "1.0");
+        std::env::set_var(WORKING_SCALE_ENV, "0.75");
+        assert_eq!(working_scale(), "0.75");
+        // Nonsense and out-of-range values fall back rather than reaching the ini.
+        std::env::set_var(WORKING_SCALE_ENV, "banana");
+        assert_eq!(working_scale(), "1.0");
+        std::env::set_var(WORKING_SCALE_ENV, "9");
+        assert_eq!(working_scale(), "1.0");
+        std::env::remove_var(WORKING_SCALE_ENV);
+
+        let ini = "[DlssNr]\nEnabled=auto\n";
+        let out = set_ini_key(ini, "DlssNr", "WorkingScale", "0.75").unwrap();
+        assert!(out.contains("WorkingScale=0.75"), "{out}");
     }
 
     #[test]

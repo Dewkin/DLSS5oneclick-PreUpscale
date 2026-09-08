@@ -77,6 +77,10 @@ pub struct App {
     last_update_check: std::time::Instant,
     /// "Also install the RenoDX HDR mod" checkbox.
     renodx_on: bool,
+    /// OptiScaler route: fraction of the frame the DLSS 5 model works at.
+    /// Its cost falls with the square of this, so it is the biggest fps lever
+    /// on that route. 1.0 = full size.
+    working_scale: f32,
     /// ReShade engine: run the experimental neural-upstream consumer instead of
     /// the stable RenoDX DLSS 5 add-on.
     upstream_on: bool,
@@ -224,6 +228,7 @@ impl App {
             update: UpdateState::Idle,
             update_rx: None,
             renodx_on: false,
+            working_scale: 1.0,
             upstream_on: false,
             renodx: RenodxLookup::Idle,
             renodx_rx: None,
@@ -402,6 +407,10 @@ impl App {
         let engine = self.engine;
         let with_renodx = self.renodx_on;
         let upstream = self.upstream_on;
+        std::env::set_var(
+            installer::WORKING_SCALE_ENV,
+            format!("{:.2}", self.working_scale),
+        );
         let (tx, rx): (Sender<Msg>, Receiver<Msg>) = channel();
         self.rx = Some(rx);
         self.running = true;
@@ -2714,6 +2723,56 @@ impl eframe::App for App {
                     ) {
                         self.engine = Engine::Opti;
                     }
+                }
+                if self.engine == Engine::Opti {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        ui.label(
+                            RichText::new("MODEL RESOLUTION")
+                                .font(t::plex_semibold(11.0))
+                                .color(t::TEXT_MUTED),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "\u{2014} the frame stays full size; only the model's own work is done smaller",
+                            )
+                            .font(t::plex(11.0))
+                            .color(t::TEXT_DIM),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        // Cost falls with the square, so the saving is worth naming.
+                        for (scale, label, note) in [
+                            (1.0_f32, "100%", "full cost"),
+                            (0.75, "75%", "about half the cost"),
+                            (0.5, "50%", "about a quarter"),
+                        ] {
+                            let on = (self.working_scale - scale).abs() < 0.01;
+                            let btn = egui::Button::new(
+                                RichText::new(label)
+                                    .font(t::plex_medium(12.0))
+                                    .color(if on { t::BG } else { t::TEXT_SOFT }),
+                            )
+                            .fill(if on { t::ACCENT } else { Color32::TRANSPARENT })
+                            .stroke(Stroke::new(1.0, if on { t::ACCENT } else { t::BORDER_STRONG }))
+                            .corner_radius(CornerRadius::same(8))
+                            .min_size(Vec2::new(72.0, 30.0));
+                            if ui.add(btn).on_hover_text(note).clicked() {
+                                self.working_scale = scale;
+                            }
+                        }
+                        ui.label(
+                            RichText::new(match self.working_scale {
+                                s if s >= 0.99 => "The model runs at full output resolution.",
+                                s if s >= 0.74 => "Costs about half as much; the biggest single fps lever here.",
+                                _ => "Costs about a quarter; the model's contribution is softer.",
+                            })
+                            .font(t::plex(11.0))
+                            .color(t::TEXT_DIM),
+                        );
+                    });
                 }
                 if self.engine == Engine::ReShade {
                     ui.add_space(6.0);
