@@ -438,6 +438,29 @@ pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
                  re-run Install, and make sure antivirus did not remove it.",
             ));
         }
+        // Some games refuse the reduced work-resolution path: the feed builds
+        // its shared textures, the staging SRV for the smaller image fails, and
+        // three failed builds stop the feed. Nothing downstream then happens —
+        // the add-on's overlay says "HOOKS ARMED - NO DLSS CREATE SEEN" and
+        // toggling neural rendering in game does nothing, which reads like the
+        // add-on is broken rather than one setting being wrong (#74).
+        if fd.contains("work-resolution staging SRV failed") {
+            let pct = fd
+                .lines()
+                .find(|l| l.contains("work resolution ("))
+                .and_then(|l| l.split("work resolution (").nth(1))
+                .and_then(|r| r.split(')').next())
+                .unwrap_or("below 100%")
+                .to_owned();
+            out.push(bad(format!(
+                "The feed could not build its textures at {pct} of the frame: \
+                 \"work-resolution staging SRV failed\", three times, and then it stopped. This \
+                 game does not accept the reduced work-resolution path. Set it back to full size \
+                 — Settings ▸ Feeder knobs ▸ work_resolution = 100 and work_upscale = 0, or pick \
+                 the High quality preset — and start the game again. Everything downstream of this \
+                 (no DLSS create, the in-game toggle doing nothing) follows from it."
+            )));
+        }
         if fd.contains("stopped:") {
             let line = fd
                 .lines()
@@ -569,6 +592,35 @@ mod tests {
             !f.iter().any(|x| x.text.contains("d3dcompiler_47.dll.bak")),
             "{f:?}"
         );
+    }
+
+    /// Dying Light refuses the reduced work-resolution path. The user sees a
+    /// stopped feed and an add-on saying it never saw a DLSS create, with
+    /// nothing naming the one setting responsible (#74).
+    #[test]
+    fn work_resolution_build_failure_names_the_setting() {
+        let (t, exe) = setup(true);
+        fs::write(
+            t.path().join("ReShade.log"),
+            "Initializing crosire's ReShade\nRegistered add-on \"DLSS 5 Neural Rendering\"\n",
+        )
+        .unwrap();
+        fs::write(
+            t.path().join("dlss5-feed.log"),
+            "[feed] building: 2176x1224 work resolution (85%) -> 2560x1440 backbuffer\n\
+             [feed] work-resolution staging SRV failed\n\
+             [feed] failure: resource build\n\
+             stopped: repeated failures. The game renders normally.\n",
+        )
+        .unwrap();
+        let f = run(&exe).unwrap();
+        let hit = f
+            .iter()
+            .find(|x| x.text.contains("work-resolution staging SRV failed"))
+            .unwrap_or_else(|| panic!("{f:?}"));
+        assert_eq!(hit.level, Level::Bad);
+        assert!(hit.text.contains("85%"), "{}", hit.text);
+        assert!(hit.text.contains("work_resolution = 100"), "{}", hit.text);
     }
 
     #[test]
