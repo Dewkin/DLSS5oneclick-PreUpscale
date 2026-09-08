@@ -1127,31 +1127,26 @@ pub fn find_game_exes(dir: &Path) -> Vec<PathBuf> {
 /// Install lands next to the real game — not the launcher (Ghostrunner).
 pub fn resolve_target(input: &Path) -> Result<(PathBuf, Vec<PathBuf>)> {
     if input.is_file() {
-        let mut search_roots: Vec<PathBuf> = Vec::new();
-        if let Some(parent) = input.parent() {
-            search_roots.push(parent.to_path_buf());
-            // Unreal: …/Ghostrunner/Ghostrunner.exe → search parent (and grandparent
-            // when Shipping lives under a same-named subfolder one level up).
-            if let Some(grand) = parent.parent() {
-                search_roots.push(grand.to_path_buf());
-            }
-        }
-        let mut cands: Vec<PathBuf> = Vec::new();
-        for root in &search_roots {
-            for e in find_game_exes(root) {
-                if !cands.iter().any(|c| c == &e) {
-                    cands.push(e);
-                }
-            }
-        }
-        if cands.is_empty() {
-            // Fall back: the file itself (may be the only PE).
-            return Ok((input.to_path_buf(), Vec::new()));
-        }
-        // Re-rank across roots: Shipping first, then 64-bit, then size.
-        cands = rank_exe_candidates(cands);
-        let best = cands[0].clone();
-        return Ok((best, cands));
+        // A named file is an instruction, not a hint: installing into a different
+        // game than the one the user pointed at writes DLLs into the wrong folder.
+        // The one substitution worth making is the Unreal launcher case, where
+        // `…/Game/Game.exe` is a bootstrapper and the real target is the
+        // `-Shipping.exe` under that same folder — never a sibling directory's game.
+        let shipping = input
+            .parent()
+            .map(find_game_exes)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|p| {
+                p != input
+                    && p.file_stem()
+                        .and_then(|s| s.to_str())
+                        .is_some_and(|s| s.to_ascii_lowercase().ends_with("-shipping"))
+            });
+        return match shipping {
+            Some(ship) => Ok((ship.clone(), vec![ship, input.to_path_buf()])),
+            None => Ok((input.to_path_buf(), Vec::new())),
+        };
     }
     if input.is_dir() {
         let c = find_game_exes(input);
@@ -1161,32 +1156,6 @@ pub fn resolve_target(input: &Path) -> Result<(PathBuf, Vec<PathBuf>)> {
         };
     }
     bail!("not found: {}", input.display())
-}
-
-fn rank_exe_candidates(found: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut scored: Vec<(i64, PathBuf)> = found
-        .into_iter()
-        .filter_map(|p| {
-            let stem = p.file_stem()?.to_str()?.to_ascii_lowercase();
-            if is_helper_name(&stem) {
-                return None;
-            }
-            let bits = exe_bitness(&p).ok()?;
-            // Keep 32-bit DX9 titles; prefer 64-bit when both exist.
-            let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0) as i64;
-            let mut score: i64 = 0;
-            if stem.ends_with("-shipping") {
-                score += 2_000_000_000;
-            }
-            if bits == 64 {
-                score += 500_000_000;
-            }
-            score += size.min(400_000_000);
-            Some((score, p))
-        })
-        .collect();
-    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
-    scored.into_iter().map(|(_, p)| p).collect()
 }
 
 /// True when ReShade/Feeder markers sit on a launcher folder but the preferred
@@ -1498,6 +1467,40 @@ mod tests {
         fs::create_dir_all(&d).unwrap();
         make_pe(&d.join("maxpayne.exe"), PE_X86);
         assert_eq!(find_game_exes(&d), vec![d.join("maxpayne.exe")]);
+    }
+
+    /// A named .exe is an instruction. Searching outward from it and picking a
+    /// "better" candidate installed into a different game entirely — the tool
+    /// wrote to a sibling folder's exe when handed one under a shared parent.
+    #[test]
+    fn resolve_target_honours_a_named_exe() {
+        let t = tempfile::tempdir().unwrap();
+        let a = t.path().join("GameA");
+        let b = t.path().join("GameB");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        let mine = make_pe(&a.join("small.exe"), PE_X64);
+        // A much larger exe next door would outrank it on size.
+        let big = b.join("Huge.exe");
+        make_pe(&big, PE_X64);
+        fs::write(&big, [b"MZ".as_slice(), &[0u8; 8_000_000]].concat()).unwrap();
+        make_pe(&big, PE_X64);
+        let (exe, _) = resolve_target(&mine).unwrap();
+        assert_eq!(exe, mine);
+    }
+
+    /// The one substitution that is still right: an Unreal launcher beside its
+    /// own -Shipping.exe resolves to the shipping build.
+    #[test]
+    fn resolve_target_prefers_shipping_beside_a_launcher() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path().join("SomeGame");
+        fs::create_dir_all(&d).unwrap();
+        let launcher = make_pe(&d.join("SomeGame.exe"), PE_X64);
+        let ship = make_pe(&d.join("SomeGame-Win64-Shipping.exe"), PE_X64);
+        let (exe, all) = resolve_target(&launcher).unwrap();
+        assert_eq!(exe, ship);
+        assert!(all.contains(&launcher));
     }
 
     #[test]
