@@ -12,7 +12,7 @@ community-retargeted runtime: it never sets the network's input, output or
 subrect dimensions, so a 0x0 region is processed and every evaluate returns
 success having done no GPU work. This fork fetches
 [Dewkin/neural-upstream](https://github.com/Dewkin/neural-upstream) instead,
-which carries fifteen fixes for that and for a family of resource-lifetime
+which carries seventeen fixes for that and for a family of resource-lifetime
 crashes.
 
 **2. That step is on by default**, because running the network before the

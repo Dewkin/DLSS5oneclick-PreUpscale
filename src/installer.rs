@@ -641,7 +641,7 @@ pub const BRIDGE_DOWNLOAD: &str =
 /// Upstream's build installs cleanly and silently does nothing on RTX 40 with a
 /// community-retargeted runtime: it never sets the input, output or subrect
 /// dimensions, so the network is asked to process a 0x0 region and every
-/// evaluate returns success having done no work. Fifteen fixes for that and for
+/// evaluate returns success having done no work. Seventeen fixes for that and for
 /// a family of resource-lifetime crashes are open as
 /// matiasLombo/neural-upstream#4. When that merges, this constant should go back
 /// to pointing at upstream.
