@@ -88,6 +88,12 @@ pub struct App {
     /// neural-upstream strength preset to write into ReShade.ini before the
     /// game starts (#68). 3 = Reference, the add-on's own default.
     upstream_preset: u8,
+    /// OptiScaler route: install wilsjo2's pre-SR multipass fork instead of
+    /// Dagherbou's build (#72).
+    opti_presr: bool,
+    /// ReShade route: pin the classic DLSS 5 add-on build, which the Feeder's
+    /// host measured to work on NVIDIA 616.64 where the current one faults (#69).
+    renodx_classic: bool,
     renodx: RenodxLookup,
     renodx_rx: Option<Receiver<RenodxLookup>>,
     /// Exe the current lookup belongs to, so a refresh does not re-fetch.
@@ -235,6 +241,8 @@ impl App {
             working_scale: 1.0,
             upstream_on: false,
             upstream_preset: 3,
+            opti_presr: false,
+            renodx_classic: false,
             renodx: RenodxLookup::Idle,
             renodx_rx: None,
             renodx_for: None,
@@ -416,6 +424,16 @@ impl App {
             installer::WORKING_SCALE_ENV,
             format!("{:.2}", self.working_scale),
         );
+        if self.opti_presr {
+            std::env::set_var(installer::OPTI_SOURCE_ENV, "presr");
+        } else {
+            std::env::remove_var(installer::OPTI_SOURCE_ENV);
+        }
+        if self.renodx_classic {
+            std::env::set_var(installer::RENODX_TAG_ENV, installer::RENODX_CLASSIC_TAG);
+        } else {
+            std::env::remove_var(installer::RENODX_TAG_ENV);
+        }
         std::env::set_var(
             installer::UPSTREAM_PRESET_ENV,
             if upstream {
@@ -2698,6 +2716,22 @@ impl eframe::App for App {
                         self.inspect_resolved();
                     }
                 }
+                // Driver 616.64 faults inside NGX with the current add-on build;
+                // the classic one is the way through until that is fixed (#69).
+                if self.engine == Engine::ReShade {
+                    let mut on = self.renodx_classic;
+                    let cb = egui::Checkbox::new(
+                        &mut on,
+                        RichText::new(
+                            "Black screen, crash or driver reset with DLSS 5 on? Install the classic add-on build (4.55)",
+                        )
+                        .font(t::plex(11.5))
+                        .color(t::TEXT_SOFT),
+                    );
+                    if ui.add_enabled(!self.running, cb).changed() {
+                        self.renodx_classic = on;
+                    }
+                }
                 if let Some(ac) = ok_status.as_ref().and_then(|s| s.anticheat) {
                     let mut on = game::ignore_anticheat();
                     let label = format!(
@@ -2772,6 +2806,47 @@ impl eframe::App for App {
                     }
                 }
                 if self.engine == Engine::Opti {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        ui.label(
+                            RichText::new("OPTISCALER BUILD")
+                                .font(t::plex_semibold(11.0))
+                                .color(t::TEXT_MUTED),
+                        );
+                        for (presr, label) in
+                            [(false, "Stable"), (true, "Pre-SR multipass \u{00b7} experimental")]
+                        {
+                            let on = self.opti_presr == presr;
+                            let btn = egui::Button::new(
+                                RichText::new(label)
+                                    .font(t::plex_medium(12.0))
+                                    .color(if on { t::BG } else { t::TEXT_SOFT }),
+                            )
+                            .fill(if on { t::ACCENT } else { Color32::TRANSPARENT })
+                            .stroke(Stroke::new(
+                                1.0,
+                                if on { t::ACCENT } else { t::BORDER_STRONG },
+                            ))
+                            .corner_radius(CornerRadius::same(8))
+                            .min_size(Vec2::new(if presr { 200.0 } else { 90.0 }, 30.0));
+                            if ui.add(btn).clicked() {
+                                self.opti_presr = presr;
+                            }
+                        }
+                    });
+                    ui.label(
+                        RichText::new(if self.opti_presr {
+                            "wilsjo2's fork: the network runs BEFORE super resolution, on the \
+                             smaller image, in 1-3 passes. Bigger download (about 160 MB) and \
+                             barely tested here \u{2014} report what you see."
+                        } else {
+                            "Dagherbou's build: the network runs after super resolution. \
+                             The one most people are running."
+                        })
+                        .font(t::plex(11.0))
+                        .color(t::TEXT_DIM),
+                    );
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;

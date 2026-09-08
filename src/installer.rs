@@ -283,8 +283,6 @@ pub enum Engine {
     Opti,
 }
 
-pub const OPTI_RELEASES: &str = "https://api.github.com/repos/Dagherbou/OptiScaler_DLSSNR/releases";
-
 const STEP_OPTI: Step = Step {
     name: "OptiScaler + DLSS Neural Rendering",
     run: step_opti,
@@ -425,6 +423,23 @@ fn manifest_tag(manifest: &str) -> Option<String> {
         .map(|t| t.trim().to_owned())
 }
 
+/// The first stable release carrying a `.zip`. Both forks also publish rolling
+/// "nightly" releases whose assets are `.7z`, and taking a release's first
+/// asset blindly picked a checksum text file or an archive the installer
+/// cannot open.
+fn pick_opti_zip(releases: &[Value]) -> Option<String> {
+    releases
+        .iter()
+        .filter(|r| r["prerelease"] != Value::Bool(true))
+        .find_map(|r| {
+            r.get("assets")?.as_array()?.iter().find_map(|a| {
+                let url = a.get("browser_download_url")?.as_str()?;
+                let name = a.get("name")?.as_str()?.to_ascii_lowercase();
+                (name.ends_with(".zip") && !name.contains("sha256")).then(|| url.to_owned())
+            })
+        })
+}
+
 fn step_opti(
     client: &Client,
     st: &GameStatus,
@@ -443,7 +458,8 @@ fn step_opti(
     // in August still ran August's build after every reinstall. The tag is
     // recorded in the manifest; a copy this tool placed is refreshed when
     // upstream moves on, and one it did not place is never touched.
-    let latest = net::latest_tag(client, OPTI_REPO).ok();
+    let repo = opti_repo();
+    let latest = net::latest_tag(client, repo).ok();
     if st.opti {
         // No manifest at all: somebody else put OptiScaler there. A manifest
         // without a "# tag" line is ours, from before the tag was recorded --
@@ -469,24 +485,18 @@ fn step_opti(
     // Stable release only (releases/latest skips pre-releases); the API list
     // and the releases page both put betas first.
     let asset: String = match latest.clone() {
-        Some(tag) => net::github_asset_url_html(client, OPTI_REPO, &tag, r#"[^"]+\.zip"#)?,
-        None => match net::get_json_github(client, OPTI_RELEASES) {
+        Some(tag) => net::github_asset_url_html(client, repo, &tag, r#"[^"]+\.zip"#)?,
+        None => match net::get_json_github(client, &opti_releases_url()) {
             Ok(releases) => releases
                 .as_array()
-                .and_then(|a| a.iter().find(|r| r["prerelease"] != Value::Bool(true)))
-                .and_then(|r| r.get("assets"))
-                .and_then(Value::as_array)
-                .and_then(|a| a.first())
-                .and_then(|a| a.get("browser_download_url"))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .ok_or_else(|| anyhow!("OptiScaler_DLSSNR has no release asset"))?,
+                .and_then(|a| pick_opti_zip(a))
+                .ok_or_else(|| anyhow!("{repo} has no release asset"))?,
             Err(_) => {
-                let tags = net::github_release_tags_html(client, OPTI_REPO, "v", 2)?;
+                let tags = net::github_release_tags_html(client, repo, "v", 2)?;
                 let tag = tags
                     .first()
-                    .ok_or_else(|| anyhow!("no OptiScaler_DLSSNR release found"))?;
-                net::github_asset_url_html(client, OPTI_REPO, tag, r#"[^"]+\.zip"#)?
+                    .ok_or_else(|| anyhow!("no {repo} release found"))?;
+                net::github_asset_url_html(client, repo, tag, r#"[^"]+\.zip"#)?
             }
         },
     };
@@ -632,6 +642,30 @@ pub const RHI_RELEASES: &str =
     "https://api.github.com/repos/RankFTW/rhi-repo/releases?per_page=100";
 pub const RHI_REPO: &str = "RankFTW/rhi-repo";
 pub const OPTI_REPO: &str = "Dagherbou/OptiScaler_DLSSNR";
+/// wilsjo2's fork: the neural pass runs before super resolution instead of
+/// after it, with 1-3 configurable passes. Same zip layout as Dagherbou's, so
+/// it installs through the same step (#72).
+pub const OPTI_PRESR_REPO: &str = "wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass";
+
+/// Which OptiScaler build to install; unset means Dagherbou's.
+pub const OPTI_SOURCE_ENV: &str = "DLSS5ONECLICK_OPTI_SOURCE";
+
+/// True when the pre-SR multipass fork was asked for.
+pub fn opti_presr() -> bool {
+    std::env::var(OPTI_SOURCE_ENV).is_ok_and(|v| v.eq_ignore_ascii_case("presr"))
+}
+
+pub fn opti_repo() -> &'static str {
+    if opti_presr() {
+        OPTI_PRESR_REPO
+    } else {
+        OPTI_REPO
+    }
+}
+
+fn opti_releases_url() -> String {
+    format!("https://api.github.com/repos/{}/releases", opti_repo())
+}
 
 #[derive(Clone, Copy)]
 pub struct Step {
@@ -1037,7 +1071,35 @@ fn best_tag(mut cands: Vec<(Vec<u64>, String, String)>) -> (String, String) {
 
 /// rhi-repo lookup that never needs the API: HTML releases pages for the tag,
 /// the expanded-assets fragment for the file.
+/// Tag of the DLSS 5 add-on build to install; unset means the newest one.
+pub const RENODX_TAG_ENV: &str = "DLSS5ONECLICK_RENODX_TAG";
+
+/// The classic-engine add-on. The Feeder's own host measured v4.7 to fault
+/// inside the driver's NGX runtime on NVIDIA 616.64 — an access violation in
+/// D3D12Core.dll reached through nvngx_dlssnr.dll — and names this build as one
+/// that passes there (#69).
+pub const RENODX_CLASSIC_TAG: &str = "renodx-dlss5-4.55";
+
+/// A pinned add-on build, when one was asked for: `(tag, url)`.
+fn rhi_pinned(client: &Client, prefix: &str) -> Option<Result<(String, String)>> {
+    if prefix != "renodx-dlss5-" {
+        return None;
+    }
+    let tag = std::env::var(RENODX_TAG_ENV).ok()?;
+    if tag.is_empty() {
+        return None;
+    }
+    Some(
+        net::github_asset_url_html(client, RHI_REPO, &tag, r#"[^"]+\.zip"#)
+            .map(|url| (tag.clone(), url))
+            .with_context(|| format!("DLSS 5 add-on build {tag} not found on {RHI_REPO}")),
+    )
+}
+
 pub fn rhi_latest(client: &Client, prefix: &str) -> Result<(String, String)> {
+    if let Some(pinned) = rhi_pinned(client, prefix) {
+        return pinned;
+    }
     if let Ok(releases) = net::get_json_github(client, RHI_RELEASES) {
         if let Some(arr) = releases.as_array() {
             if let Ok(r) = pick_latest_asset(arr, prefix) {
@@ -2288,6 +2350,38 @@ mod tests {
             .iter()
             .map(|t| json!({"tag_name": t, "assets": [{"browser_download_url": format!("https://x/{t}.zip")}]}))
             .collect()
+    }
+
+    /// Both OptiScaler forks publish a rolling "nightly" release whose assets
+    /// are .7z, and the stable ones ship a checksum .txt beside the zip. Taking
+    /// a release's first asset picked whichever happened to be listed first (#72).
+    #[test]
+    fn opti_zip_is_picked_over_checksums_and_7z() {
+        let releases = json!([
+            {"prerelease": false, "tag_name": "nightly", "assets": [
+                {"name": "OptiScaler_v10.0.0-pre1_20260908.7z", "browser_download_url": "https://x/n.7z"}
+            ]},
+            {"prerelease": false, "tag_name": "v0.7.1-hybrid", "assets": [
+                {"name": "ASSET-SHA256SUMS-v0.7.1.txt", "browser_download_url": "https://x/sums.txt"},
+                {"name": "OptiScaler-DLSSNR-v0.7.1-hybrid.zip", "browser_download_url": "https://x/good.zip"}
+            ]}
+        ]);
+        assert_eq!(
+            pick_opti_zip(releases.as_array().unwrap()).as_deref(),
+            Some("https://x/good.zip")
+        );
+    }
+
+    /// The engine choice decides which fork is fetched, and nothing else.
+    #[test]
+    fn opti_source_selects_the_fork() {
+        std::env::remove_var(OPTI_SOURCE_ENV);
+        assert_eq!(opti_repo(), OPTI_REPO);
+        std::env::set_var(OPTI_SOURCE_ENV, "presr");
+        assert_eq!(opti_repo(), OPTI_PRESR_REPO);
+        std::env::set_var(OPTI_SOURCE_ENV, "something else");
+        assert_eq!(opti_repo(), OPTI_REPO);
+        std::env::remove_var(OPTI_SOURCE_ENV);
     }
 
     #[test]
