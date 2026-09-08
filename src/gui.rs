@@ -829,6 +829,16 @@ const TILE_OPTI: Tile = Tile {
     optional: false,
 };
 
+/// The OptiScaler route's neural consumer is built into OptiScaler itself, so
+/// it needs the model and nothing else. Showing the ReShade route's add-on row
+/// here left a finished install reporting "missing" (#66).
+const TILE_OPTI_MODEL: Tile = Tile {
+    title: "DLSS 5 model \u{00b7} leaked",
+    detail: "nvngx_dlssnr.dll \u{00b7} OptiScaler's own NR pass consumes it",
+    ok: |s| s.dlssnr,
+    optional: false,
+};
+
 const TILES_NATIVE: [Tile; 4] = [
     Tile {
         title: "Game DLSS",
@@ -906,7 +916,7 @@ fn tiles_for(
 fn base_tiles(st: Option<&GameStatus>, engine: Engine, upstream_on: bool) -> Vec<&'static Tile> {
     match st.map(|s| s.mode) {
         Some(game::Mode::Native) if engine == Engine::Opti || st.is_some_and(|s| s.opti) => {
-            vec![&TILES_NATIVE[0], &TILE_OPTI, &TILES_NATIVE[2]]
+            vec![&TILES_NATIVE[0], &TILE_OPTI, &TILE_OPTI_MODEL]
         }
         Some(game::Mode::Native) => {
             let needs_bridge = st.is_some_and(|s| s.needs_bridge());
@@ -3237,4 +3247,41 @@ pub fn run() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::{stub_status, Api, Mode};
+
+    /// A finished OptiScaler install must not show a missing row: OptiScaler
+    /// carries its own neural pass, so `renodx-dlss5.addon64` is never
+    /// installed on that route and asking for it contradicted `complete()` (#66).
+    #[test]
+    fn opti_route_tiles_agree_with_complete() {
+        let mut st = stub_status(Mode::Native, Api::Dx11);
+        st.opti = true;
+        st.dlssnr = true;
+        assert!(st.complete());
+        let tiles = tiles_for(Some(&st), Engine::Opti, false, false);
+        let missing: Vec<&str> = tiles
+            .iter()
+            .filter(|t| !(t.ok)(&st) && !t.optional)
+            .map(|t| t.title)
+            .collect();
+        assert!(missing.is_empty(), "shown as missing: {missing:?}");
+    }
+
+    /// The ReShade route still wants both files, and still says so when the
+    /// add-on is absent.
+    #[test]
+    fn reshade_route_still_wants_the_addon() {
+        let mut st = stub_status(Mode::Native, Api::Dx11);
+        st.reshade = true;
+        st.dlssnr = true;
+        let tiles = tiles_for(Some(&st), Engine::ReShade, false, false);
+        assert!(tiles
+            .iter()
+            .any(|t| t.title == "DLSS 5 add-on \u{00b7} leaked" && !(t.ok)(&st)));
+    }
 }

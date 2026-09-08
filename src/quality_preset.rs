@@ -385,46 +385,7 @@ pub fn feed_fx_uniforms(r: &ResolvedQuality) -> Vec<(&'static str, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{Api, Mode};
-    use std::path::PathBuf;
-
-    fn stub_status(mode: Mode, api: Api) -> GameStatus {
-        GameStatus {
-            mode,
-            api,
-            bridge: false,
-            opti: false,
-            gpu: Some((
-                crate::gpu::Gpu {
-                    name: "NVIDIA GeForce RTX 4060".into(),
-                    vendor: "NVIDIA".into(),
-                },
-                Tier::Rtx40,
-            )),
-            exe: PathBuf::from(r"C:\g\game.exe"),
-            bitness: 64,
-            reshade: false,
-            headers: false,
-            feeder: false,
-            lumenite: false,
-            dlss5_addon: false,
-            dlssnr: false,
-            dlss: false,
-            mode_detected: mode,
-            host_exe: false,
-            host_reshade: false,
-            re_engine: false,
-            reframework: false,
-            upstream: false,
-            unreal_likely: false,
-            unity_likely: false,
-            rt_likely: false,
-            renodx_mod: None,
-            foreign_renodx: vec![],
-            anticheat: None,
-            problems: vec![],
-        }
-    }
+    use crate::game::{stub_status, Api, Mode};
 
     #[test]
     fn auto_d3d11_rtx_enables_ofa() {

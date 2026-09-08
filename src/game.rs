@@ -774,6 +774,46 @@ pub struct GameStatus {
     pub problems: Vec<String>,
 }
 
+/// A blank status for tests, so a test can say only the fields it cares about.
+#[cfg(test)]
+pub(crate) fn stub_status(mode: Mode, api: Api) -> GameStatus {
+    GameStatus {
+        mode,
+        api,
+        bridge: false,
+        opti: false,
+        gpu: Some((
+            gpu::Gpu {
+                name: "NVIDIA GeForce RTX 4060".into(),
+                vendor: "NVIDIA".into(),
+            },
+            gpu::Tier::Rtx40,
+        )),
+        exe: PathBuf::from(r"C:\g\game.exe"),
+        bitness: 64,
+        reshade: false,
+        headers: false,
+        feeder: false,
+        lumenite: false,
+        dlss5_addon: false,
+        dlssnr: false,
+        dlss: false,
+        mode_detected: mode,
+        host_exe: false,
+        host_reshade: false,
+        re_engine: false,
+        reframework: false,
+        upstream: false,
+        unreal_likely: false,
+        unity_likely: false,
+        rt_likely: false,
+        renodx_mod: None,
+        foreign_renodx: vec![],
+        anticheat: None,
+        problems: vec![],
+    }
+}
+
 pub const IGNORE_ANTICHEAT_ENV: &str = "DLSS5ONECLICK_IGNORE_ANTICHEAT";
 /// `feeder` or `native`: override the DLSS detection (a stray `nvngx_dlss.dll`
 /// makes a game without DLSS look native; some games load DLSS from elsewhere).
