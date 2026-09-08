@@ -113,6 +113,14 @@ fn reshade_host_exe(log: &str) -> Option<String> {
 pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
     let d = st.game_dir();
     let mut out = Vec::new();
+    let consumer = st.consumer_dir();
+    let rs_log = read(&consumer, "ReShade.log").or_else(|| read(&consumer, "ReShade2.log"));
+    // Wine and Proton substitute their own d3dcompiler_47.dll, whose HLSL
+    // compiler is vkd3d-shader. It does not implement every attribute ReShade
+    // emits, and says so in its own words (#70).
+    let wine_hlsl = rs_log
+        .as_deref()
+        .is_some_and(|l| l.contains("not yet implemented feature"));
 
     // ── a game-shipped HLSL compiler shadowing the system one ──────
     // The add-on compiles its NR pass at cs_5_1. A d3dcompiler_47.dll that
@@ -120,7 +128,7 @@ pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
     // one does not know that target: "error X3506: unrecognized compiler
     // target" and no neural rendering, with everything else looking correct.
     let compiler = d.join("d3dcompiler_47.dll");
-    if compiler.is_file() {
+    if compiler.is_file() && !wine_hlsl {
         let ver = crate::ngx::file_version(&compiler).unwrap_or_else(|| "unknown".into());
         out.push(warn(format!(
             "The game ships its own d3dcompiler_47.dll ({ver}), which Windows loads instead of \
@@ -134,7 +142,6 @@ pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
     // Two builds of nvngx_dlssnr.dll are in circulation and only the version
     // resource separates them; every failing RTX 50 report so far carries the
     // .SF one, so the log has to name it.
-    let consumer = st.consumer_dir();
     for p in [d.join(game::DLSSNR_DLL), consumer.join(game::DLSSNR_DLL)] {
         if !p.is_file() {
             continue;
@@ -159,8 +166,7 @@ pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
     // folder's log for a 32-bit game reads the *feeder's* 32-bit ReShade, which
     // never loads the add-on, so every 32-bit report came back "the add-on
     // never registered" no matter how healthy the install was (#69).
-    let Some(rs) = read(&consumer, "ReShade.log").or_else(|| read(&consumer, "ReShade2.log"))
-    else {
+    let Some(rs) = rs_log else {
         out.push(bad(if st.is32() {
             "No host64\\ReShade.log: the 64-bit helper's ReShade never loaded, which is what \
              \"host lost: pipe never appeared\" in dlss5-feed.log means. Look in \
@@ -250,6 +256,28 @@ pub fn diagnose(st: &GameStatus) -> Vec<Finding> {
                  without them it has nothing to work with).",
             ));
         }
+    }
+
+    // Linux/Proton: ReShade generates HLSL with [fastopt] for shader model 4
+    // and up, and Wine's d3dcompiler_47 (vkd3d-shader) has not implemented it,
+    // so DLSS5_Feed.fx and the Lumenite shaders never build — with the feed
+    // add-on then reporting its technique missing, which reads like our bug
+    // rather than a missing compiler (#70).
+    if wine_hlsl {
+        let line = rs
+            .lines()
+            .find(|l| l.contains("not yet implemented feature"))
+            .unwrap_or("")
+            .trim();
+        out.push(bad(format!(
+            "The effects failed to compile in Wine/Proton's own HLSL compiler: {line} \
+             That message comes from vkd3d-shader, which Wine's d3dcompiler_47.dll uses; \
+             ReShade emits attributes it has not implemented. Install Microsoft's real \
+             d3dcompiler_47 into the prefix — protontricks <appid> d3dcompiler_47, or \
+             winetricks d3dcompiler_47 — and start the game again. If the game shipped its \
+             own d3dcompiler_47.dll, leave it in place: under Proton it may be the only \
+             working compiler there is."
+        )));
     }
 
     // The compile failure itself, which is unambiguous when it appears.
@@ -514,6 +542,33 @@ mod tests {
         .unwrap();
         let f = run(&exe).unwrap();
         assert!(f.iter().any(|x| x.text.contains("host64")), "{f:?}");
+    }
+
+    /// Under Proton the effects are compiled by Wine's d3dcompiler_47
+    /// (vkd3d-shader), which has not implemented [fastopt]. Saying "the add-on
+    /// never registered" or "rename your d3dcompiler" sends the user in the
+    /// wrong direction — the second one actively removes the working compiler (#70).
+    #[test]
+    fn wine_hlsl_compiler_is_named_and_rename_advice_suppressed() {
+        let (t, exe) = setup(true);
+        fs::write(t.path().join("d3dcompiler_47.dll"), b"MZ").unwrap();
+        fs::write(
+            t.path().join("ReShade.log"),
+            "Initializing crosire's ReShade version '6.8.0'\n\
+             ERROR | Failed to compile 'DLSS5_Feed.fx':\n\
+             <anonymous>:118:13: E5017: Aborting due to not yet implemented feature: Unhandled attribute 'fastopt'.\n",
+        )
+        .unwrap();
+        let f = run(&exe).unwrap();
+        assert!(
+            f.iter()
+                .any(|x| x.level == Level::Bad && x.text.contains("vkd3d-shader")),
+            "{f:?}"
+        );
+        assert!(
+            !f.iter().any(|x| x.text.contains("d3dcompiler_47.dll.bak")),
+            "{f:?}"
+        );
     }
 
     #[test]
