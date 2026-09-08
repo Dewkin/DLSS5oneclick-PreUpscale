@@ -633,11 +633,20 @@ fn uninstall_opti(d: &Path, removed: &mut Vec<String>) -> Result<()> {
 
 pub const BRIDGE_DOWNLOAD: &str =
     "https://github.com/NIGos/dlss5-bridge/releases/latest/download/dlss5-bridge.addon64";
-/// matiasLombo/neural-upstream: the neural consumer that runs the network at the
-/// game's render resolution instead of at output resolution, replacing the
-/// RenoDX DLSS 5 add-on rather than joining it.
+/// The neural consumer that runs the network at the game's render resolution
+/// instead of at output resolution, replacing the RenoDX DLSS 5 add-on rather
+/// than joining it.
+///
+/// This fork ships Dewkin/neural-upstream rather than matiasLombo's release.
+/// Upstream's build installs cleanly and silently does nothing on RTX 40 with a
+/// community-retargeted runtime: it never sets the input, output or subrect
+/// dimensions, so the network is asked to process a 0x0 region and every
+/// evaluate returns success having done no work. Fifteen fixes for that and for
+/// a family of resource-lifetime crashes are open as
+/// matiasLombo/neural-upstream#4. When that merges, this constant should go back
+/// to pointing at upstream.
 const UPSTREAM_DOWNLOAD: &str =
-    "https://github.com/matiasLombo/neural-upstream/releases/latest/download/nvngx.dll.addon64";
+    "https://github.com/Dewkin/neural-upstream/releases/latest/download/nvngx.dll.addon64";
 pub const RHI_RELEASES: &str =
     "https://api.github.com/repos/RankFTW/rhi-repo/releases?per_page=100";
 pub const RHI_REPO: &str = "RankFTW/rhi-repo";

@@ -1,4 +1,52 @@
-# DLSS5oneclick
+# DLSS5oneclick · Pre-Upscale
+
+**A fork of [faisalkindi/DLSS5oneclick](https://github.com/faisalkindi/DLSS5oneclick).**
+All of the game detection, downloading and installation below is that project's
+work, unchanged. This fork differs in exactly two ways.
+
+**1. The Neural Upstream step downloads a fixed build.**
+Upstream fetches the neural consumer from
+[matiasLombo/neural-upstream](https://github.com/matiasLombo/neural-upstream).
+That build installs cleanly and silently does nothing on RTX 40 with a
+community-retargeted runtime: it never sets the network's input, output or
+subrect dimensions, so a 0x0 region is processed and every evaluate returns
+success having done no GPU work. This fork fetches
+[Dewkin/neural-upstream](https://github.com/Dewkin/neural-upstream) instead,
+which carries fifteen fixes for that and for a family of resource-lifetime
+crashes.
+
+**2. That step is on by default**, because running the network before the
+upscale rather than after it is the entire point of this fork.
+
+Measured on an RTX 4090 at 5120x2160 output, DLSS Quality, with zero evaluate
+failures and zero passthrough frames:
+
+| Game | Render res | Network |
+|---|---|---|
+| Dead Space (2023) | 2972x1256 | 5.41 ms |
+| Red Dead Redemption | 2970x1253 | 5.40 ms |
+| Red Dead Redemption 2 | 3413x1440 | 7.07 ms |
+| Oblivion Remastered | 2972x1256 | 5.92 ms |
+
+The same network costs 16.4 ms at 5120x2160 after the upscale. Cost tracks pixel
+count, which is why running it first is worth doing.
+
+**The saving only exists when DLSS is actually upscaling.** Set the game to
+Quality, Balanced or Performance. In DLAA there is nothing to run ahead of and
+the cost is identical.
+
+The fixes are offered back upstream as
+[matiasLombo/neural-upstream#4](https://github.com/matiasLombo/neural-upstream/pull/4).
+If that merges, this fork's only remaining difference is the default, and the
+download should be pointed back at upstream.
+
+Credit for the fixes is not all ours: two of them were found and published by the
+reporter of
+[matiasLombo/neural-upstream#3](https://github.com/matiasLombo/neural-upstream/issues/3),
+who got Stellar Blade working and posted the diagnosis as an issue.
+
+---
+
 
 <p>
   <a href="https://github.com/faisalkindi/DLSS5oneclick/releases/latest"><img src="https://img.shields.io/github/v/release/faisalkindi/DLSS5oneclick?style=flat-square&color=2878D0&label=Download" alt="Download"></a>

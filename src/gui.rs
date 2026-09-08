@@ -239,7 +239,7 @@ impl App {
             update_rx: None,
             renodx_on: false,
             working_scale: 1.0,
-            upstream_on: false,
+            upstream_on: true,
             upstream_preset: 3,
             opti_presr: false,
             renodx_classic: false,
@@ -898,8 +898,8 @@ const TILES_NATIVE: [Tile; 4] = [
 ];
 
 const TILE_UPSTREAM: Tile = Tile {
-    title: "Neural Upstream \u{00b7} experimental",
-    detail: "nvngx.dll.addon64 (matiasLombo) \u{00b7} nvngx_dlssnr.dll",
+    title: "Neural Upstream \u{00b7} runs before the upscale",
+    detail: "nvngx.dll.addon64 (pre-upscale build) \u{00b7} nvngx_dlssnr.dll",
     ok: |s| s.upstream && s.dlssnr,
     optional: false,
 };
