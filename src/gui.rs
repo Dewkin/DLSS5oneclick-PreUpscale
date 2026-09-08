@@ -2469,6 +2469,12 @@ impl eframe::App for App {
                     }
                     Page::Setup => {}
                 }
+                // Everything below scrolls: on a 768 px-tall screen the button row
+                // and the log fell off the bottom with no way to reach them (#64).
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 12.0;
                 // The setup panel was designed at 720 px; keep it from stretching.
                 ui.set_max_width(860.0);
 
@@ -3091,6 +3097,7 @@ impl eframe::App for App {
                      Optional TRAA (LUMENITE: TRAA): keep it BELOW DLSS 5 Feed; Edge Detection=Geometric + Protect UI/text on — \
                      re-run install to patch TRAA if UI still smears.")
                     .font(t::plex(11.0)).color(t::TEXT_DIM));
+                    });
             });
 
         // ── dialogs ───────────────────────────────────────────────
@@ -3129,8 +3136,12 @@ Remove incl. ReShade also deletes ReShade (dxgi.dll, ini/logs). Leftover shaders
 pub fn run() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1100.0, 780.0])
-        .with_min_inner_size([880.0, 620.0])
-        .with_title(concat!("DLSS5oneclick ", env!("CARGO_PKG_VERSION"),));
+        // A 1366x768 screen has ~730 px of usable height once the taskbar and the
+        // title bar are gone, so a 620 px floor left the window unshrinkable there
+        // and the buttons unreachable (#64). Everything scrolls now, so this can go
+        // as small as the layout itself needs.
+        .with_min_inner_size([880.0, 420.0])
+        .with_title(concat!("DLSS5oneclick ", env!("CARGO_PKG_VERSION")));
     if let Some(icon) = logo::icon_data() {
         viewport = viewport.with_icon(icon);
     }
