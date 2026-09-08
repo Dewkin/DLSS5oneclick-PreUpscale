@@ -800,6 +800,25 @@ pub fn ignore_anticheat() -> bool {
     std::env::var_os(IGNORE_ANTICHEAT_ENV).is_some()
 }
 
+/// Override for the GPU check. Named here rather than spelled out at each use
+/// so the GUI tick and the environment variable cannot drift apart (#3).
+pub const SKIP_GPU_CHECK_ENV: &str = "DLSS5ONECLICK_SKIP_GPU_CHECK";
+
+pub fn skip_gpu_check() -> bool {
+    std::env::var_os(SKIP_GPU_CHECK_ENV).is_some()
+}
+
+/// GUI checkbox: same switch as the environment variable. A GUI user cannot
+/// set an env var for an already-running window, which left the refusal
+/// naming a fix they could not reach (#3).
+pub fn set_skip_gpu_check(on: bool) {
+    if on {
+        std::env::set_var(SKIP_GPU_CHECK_ENV, "1");
+    } else {
+        std::env::remove_var(SKIP_GPU_CHECK_ENV);
+    }
+}
+
 /// GUI checkbox / `--ignore-anticheat`: same switch as the environment variable.
 pub fn set_ignore_anticheat(on: bool) {
     if on {
@@ -891,13 +910,15 @@ pub fn inspect(exe: &Path) -> Result<GameStatus> {
         }
     }
     let gpu = gpu::best();
-    let skip_gpu = std::env::var_os("DLSS5ONECLICK_SKIP_GPU_CHECK").is_some();
+    let skip_gpu = skip_gpu_check();
     if let Some((g, t)) = &gpu {
         if !t.can_run() && !skip_gpu {
             problems.push(format!(
-                "GPU is {} ({}): the DLSS 5 model runs on NVIDIA RTX only (it needs tensor cores and NGX). Misdetected? Set DLSS5ONECLICK_SKIP_GPU_CHECK=1.",
+                "GPU is {} ({}): the DLSS 5 model runs on NVIDIA RTX only (it needs tensor cores and NGX). \
+                 Misdetected, or running through Remote Desktop? Tick the box below, or set {}=1.",
                 g.name,
-                t.label()
+                t.label(),
+                SKIP_GPU_CHECK_ENV
             ));
         }
     }
@@ -1924,6 +1945,21 @@ mod tests {
             utf16.push(0);
         }
         assert!(dll_mentions_dgvoodoo(&utf16));
+    }
+
+    /// Remote Desktop hides the real card behind a virtual adapter, so the GPU
+    /// check refuses a machine that works locally. The escape hatch has to be
+    /// reachable from the GUI, not only from an environment variable a running
+    /// window cannot be given (#3).
+    #[test]
+    fn skip_gpu_check_is_the_same_switch_from_either_side() {
+        std::env::remove_var(SKIP_GPU_CHECK_ENV);
+        assert!(!skip_gpu_check());
+        set_skip_gpu_check(true);
+        assert!(skip_gpu_check());
+        assert_eq!(std::env::var(SKIP_GPU_CHECK_ENV).as_deref(), Ok("1"));
+        set_skip_gpu_check(false);
+        assert!(!skip_gpu_check());
     }
 
     #[test]

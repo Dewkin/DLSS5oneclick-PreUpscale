@@ -2651,6 +2651,30 @@ impl eframe::App for App {
                         );
                     }
                 }
+                // Remote Desktop hands the session a virtual display adapter, so the
+                // real card is invisible and the check refuses a machine that would
+                // work locally (#3). Same shape of escape hatch as the anti-cheat one.
+                if self
+                    .status
+                    .as_ref()
+                    .and_then(|r| r.as_ref().ok())
+                    .is_some_and(|s| s.problems.iter().any(|p| p.starts_with("GPU is ")))
+                    || game::skip_gpu_check()
+                {
+                    let mut on = game::skip_gpu_check();
+                    let cb = egui::Checkbox::new(
+                        &mut on,
+                        RichText::new(
+                            "That is not the card I game on \u{2014} Remote Desktop, a virtual display, or a misread. Check anyway, at my own risk",
+                        )
+                        .font(t::plex(11.5))
+                        .color(t::TEXT_SOFT),
+                    );
+                    if ui.add_enabled(!self.running, cb).changed() {
+                        game::set_skip_gpu_check(on);
+                        self.inspect_resolved();
+                    }
+                }
                 if let Some(ac) = ok_status.as_ref().and_then(|s| s.anticheat) {
                     let mut on = game::ignore_anticheat();
                     let label = format!(
