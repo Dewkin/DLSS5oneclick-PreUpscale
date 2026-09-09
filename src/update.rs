@@ -11,7 +11,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub const REPO: &str = "faisalkindi/DLSS5oneclick";
+// This fork updates from its own releases. Pointing at the parent repository
+// meant every user was told an update was available and then handed the
+// original build, which defaults the neural add-on back to RenoDX and puts
+// renodx-dlss5.addon64 into the game folder again. Seen in the wild within
+// hours: a user deleted that file, clicked Update, and it returned.
+pub const REPO: &str = "Dewkin/DLSS5oneclick-PreUpscale";
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
