@@ -1923,8 +1923,31 @@ fn install_quality() -> ResolvedQuality {
         .unwrap_or_else(quality_preset::fallback_medium)
 }
 
+/// True when this game has already refused a reduced work resolution.
+///
+/// Some games cannot create the staging SRV for the smaller image at any size
+/// below full — Dying Light fails identically at 90% and 85% and works at 100%.
+/// The feed retries three times and stops, before any DLSS create, so the whole
+/// install goes quiet and nothing on screen says why (#74).
+pub fn work_resolution_refused(game_dir: &Path) -> bool {
+    fs::read_to_string(game_dir.join("dlss5-feed.log"))
+        .is_ok_and(|l| l.contains("work-resolution staging SRV failed"))
+}
+
 pub fn write_feeder_cfg(game_dir: &Path, r: &ResolvedQuality) -> Result<()> {
     let path = game_dir.join("dlss5-feed.cfg");
+    // A preset that seeds a reduced work resolution would otherwise put this
+    // game straight back into the failure it just came out of, every install.
+    let mut r = r.clone();
+    if r.work_resolution < 100 && work_resolution_refused(game_dir) {
+        r.work_resolution = 100;
+        r.work_upscale = 0;
+        r.summary = format!(
+            "{} - work_resolution held at 100% (this game refused a smaller one)",
+            r.summary
+        );
+    }
+    let r = &r;
     let mut text = quality_preset::feeder_cfg_text(r);
     // Overlay UX defaults from Settings (log_detail / evaluate_stride / …).
     let settings = crate::settings::Settings::load();
@@ -1952,6 +1975,11 @@ fn step_config(_c: &Client, st: &GameStatus, _w: &Path, progress: Progress) -> R
         game::RESHADE_PRESET.into(),
         "dlss5-feed.cfg".into(),
     ];
+    if q.work_resolution < 100 && work_resolution_refused(st.game_dir()) {
+        out.push(
+            "work_resolution held at 100%: this game's log shows it refused a smaller one".into(),
+        );
+    }
     progress(100, "ReShade + feeder defaults (Optimize on first attach)");
     if let Some(msg) = apply_traa_ui_patch(st.game_dir())? {
         out.push(msg);
@@ -2382,6 +2410,37 @@ mod tests {
         std::env::set_var(OPTI_SOURCE_ENV, "something else");
         assert_eq!(opti_repo(), OPTI_REPO);
         std::env::remove_var(OPTI_SOURCE_ENV);
+    }
+
+    /// Dying Light refuses any reduced work resolution: identical failure at
+    /// 90% and 85%, fine at 100%. Re-running Install used to write the preset's
+    /// smaller value straight back and break the game again (#74).
+    #[test]
+    fn a_game_that_refused_a_smaller_work_resolution_keeps_full_size() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path();
+        let mut q = quality_preset::fallback_medium();
+        q.work_resolution = 85;
+        q.work_upscale = 1;
+
+        // No log yet: the preset is written as chosen.
+        write_feeder_cfg(d, &q).unwrap();
+        let cfg = fs::read_to_string(d.join("dlss5-feed.cfg")).unwrap();
+        assert!(cfg.contains("work_resolution=85"), "{cfg}");
+
+        // A log carrying the failure pins it back to full size.
+        fs::write(
+            d.join("dlss5-feed.log"),
+            "[feed] building: 2304x1296 work resolution (90%) -> 2560x1440 backbuffer\n\
+             [feed] work-resolution staging SRV failed\n\
+             [feed] failure: resource build\n",
+        )
+        .unwrap();
+        assert!(work_resolution_refused(d));
+        write_feeder_cfg(d, &q).unwrap();
+        let cfg = fs::read_to_string(d.join("dlss5-feed.cfg")).unwrap();
+        assert!(cfg.contains("work_resolution=100"), "{cfg}");
+        assert!(cfg.contains("work_upscale=0"), "{cfg}");
     }
 
     #[test]
